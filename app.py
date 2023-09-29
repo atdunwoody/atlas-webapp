@@ -7,6 +7,8 @@ import matplotlib.cm as cm
 import matplotlib.colors as mcolors
 from functions import *
 
+st.set_page_config(layout = 'wide')
+
 @st.cache_data
 def load_data():
 	gdf = gpd.read_feather('./data/df_full.feather').to_crs('EPSG:4326')
@@ -80,9 +82,10 @@ def calculate_route(gdf, start, end, min, max):
 
 def main():
 	# Title and description
-	st.title("Loopplezier kaart")
-	st.write("Welkom bij de loopplezier kaart van de Hogeschool van Amsterdam. Kies in het menu links welke omgevingsfactoren je wil laten meewegen in de loopbaarheidsscore. Klik op 'Calculate' en bekijk de kaart (groen is aantrekkelijk, rood minder aantrekkelijk).")
-	st.write("De zwarte puntjes zijn knooppunten met een id. Als je twee knooppunten kiest kan je ook de meest aantrekkelijke route bereken. Klik op 'Add route' om jouw gepersonaliseerde route te tonen")
+	
+	st.title("Loopplezierkaart")
+	st.write("Welkom bij de loopplezierkaart van de Hogeschool van Amsterdam. Kies in het menu links welke omgevingsfactoren je wil laten meewegen in de loopbaarheidsscore. Klik op 'Calculate' en bekijk de kaart (groen is aantrekkelijk, rood minder aantrekkelijk).")
+	st.write("De zwarte puntjes zijn knooppunten met een id. Als je twee knooppunten kiest en de id's invult in het menu kan je ook de meest aantrekkelijke route bereken a.d.v. de eerder gekozen score. Klik op 'Add route' om jouw gepersonaliseerde route te tonen")
 	
 	(gdf, nodes) = load_data()
 	
