@@ -4,3 +4,4 @@ geopandas
 pulp
 scipy
 networkx
+streamlit-folium
