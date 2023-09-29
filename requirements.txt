@@ -5,3 +5,4 @@ pulp
 scipy
 networkx
 streamlit-folium
+joblib
