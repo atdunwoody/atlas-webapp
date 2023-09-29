@@ -81,6 +81,8 @@ def calculate_route(gdf, start, end, min, max):
 def main():
 	# Title and description
 	st.title("Loopplezier kaart")
+	st.text("Welkom bij de loopplezier kaart van de Hogeschool van Amsterdam. Kies in het menu links welke omgevingsfactoren je wil laten meewegen in de loopbaarheidsscore. Klik op 'Calculate' en bekijk de kaart (groen is aantrekkelijk, rood minder aantrekkelijk).")
+	st.text("De zwarte puntjes zijn knooppunten met een id. Als je twee knooppunten kiest kan je ook de meest aantrekkelijke route bereken. Klik op 'Add route' om jouw gepersonaliseerde route te tonen")
 	
 	(gdf, nodes) = load_data()
 	
