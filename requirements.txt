@@ -1,0 +1,6 @@
+matplotlib
+folium
+geopandas
+pulp
+scipy
+networkx
