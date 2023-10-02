@@ -85,7 +85,7 @@ def main():
 	
 	st.title("Loopplezierkaart")
 	st.write("Welkom bij de loopplezierkaart van de Hogeschool van Amsterdam. Kies in het menu links welke omgevingsfactoren je wil laten meewegen in de loopbaarheidsscore. Klik op 'Calculate' en bekijk de kaart (groen is aantrekkelijk, rood minder aantrekkelijk).")
-	st.write("De zwarte puntjes zijn knooppunten met een id. Als je twee knooppunten kiest en de id's invult in het menu kan je ook de meest aantrekkelijke route bereken a.d.v. de eerder gekozen score. Klik op 'Add route' om jouw gepersonaliseerde route te tonen")
+	st.write("De zwarte puntjes zijn knooppunten met een id. Als je twee knooppunten kiest en de id's invult in het menu kan je ook de meest aantrekkelijke route bereken tussen de twee punten a.d.v. de eerder gekozen score. Klik op 'Add route' om jouw gepersonaliseerde route te tonen")
 	
 	(gdf, nodes) = load_data()
 	
@@ -95,33 +95,36 @@ def main():
 	df_route = None
 	route = False
 	calculate_triggered = False
+	with st.sidebar.form("Score input"):	
+		ovl = st.number_input("Score openbare verlichting", -10,10,0,1,  key="ovl")
+		bomen = st.number_input("Score bomen", -10,10,0,1, key="bomen")
+		water = st.number_input("Score water", -10,10,0,1, key="water")
+		monumenten = st.number_input("Score monumenten", -10,10,0,1, key="monumenten")
+		wegen = st.number_input("Score drukke wegen", -10,10,0,1, key="wegen")
+		parken = st.number_input("Score parken", -10,10,0,1, key="parken")
+		calculate_button = st.form_submit_button("Calculate")
 	
-	ovl = st.sidebar.number_input("Score openbare verlichting", -10,10,0,1,  key="ovl")
-	bomen = st.sidebar.number_input("Score bomen", -10,10,0,1, key="bomen")
-	water = st.sidebar.number_input("Score water", -10,10,0,1, key="water")
-	monumenten = st.sidebar.number_input("Score monumenten", -10,10,0,1, key="monumenten")
-	wegen = st.sidebar.number_input("Score drukke wegen", -10,10,0,1, key="wegen")
-	parken = st.sidebar.number_input("Score parken", -10,10,0,1, key="parken")
-	calculate_button = st.sidebar.button("Calculate")
-	
-	start = st.sidebar.number_input("Start knooppunt", 0,3100,0,1,  key="start")
-	end = st.sidebar.number_input("Eind knooppunt", 0,3100,0,1,  key="end")
-	min_dist = st.sidebar.number_input("Minimale afstand", 0,10000,0,100,  key="min_dist")
-	max_dist = st.sidebar.number_input("Maximale afstand", 0,10000,0,100,  key="max_dist")
-	add_route = st.sidebar.button("Add route")
-		
+	with st.sidebar.form("Route"):	
+		start = st.number_input("Start knooppunt", 0,3100,0,1,  key="start")
+		end = st.number_input("Eind knooppunt", 0,3100,0,1,  key="end")
+		min_dist = st.number_input("Minimale afstand", 500,10000,500,100,  key="min_dist")
+		max_dist = st.number_input("Maximale afstand", 500,10000,500,100,  key="max_dist")
+		add_route = st.form_submit_button("Add route")
+			
 	if calculate_button:
 		gdf = calculate_new_column(gdf, ovl, bomen, water, monumenten, wegen, parken)
-		calculate_triggered = True
+		#calculate_triggered = True
 
 	if add_route:
 		gdf = calculate_new_column(gdf, ovl, bomen, water, monumenten, wegen, parken)
 		df_route = calculate_route(gdf, start, end, min_dist, max_dist)
 		route = True
-		calculate_triggered = True
+		#calculate_triggered = True
 	
-	if calculate_triggered:
-		 folium_static(create_map(gdf, nodes, df_route, route))#, width=800, height=600)
+	#st.write(calculate_triggered)
+	
+	#if calculate_triggered:
+	folium_static(create_map(gdf, nodes, df_route, route))#, width=800, height=600)
 
 	calculate_triggered = False
 	route = False
