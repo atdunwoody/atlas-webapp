@@ -64,7 +64,7 @@ def distanceScoreRoute(a,s,solution):
 
     return distance, score
 	
-def looproutes_ant_colony_optimization(a,s,s_norm,i_s,j_e,g_min,g_max,n_ants = 300,n_iter = 10,alpha = 0.5,beta =0.5,rho = 0.5,Q3 = 1,paths = []):
+def looproutes_ant_colony_optimization(a,s,s_norm,i_s,j_e,g_min,g_max,n_ants = 200,n_iter = 12,alpha = 0.5,beta =0.5,rho = 0.5,Q3 = 1,paths = []):
     # ant colony optimization om looproutes te bepalen
     n = a.shape[0]
     

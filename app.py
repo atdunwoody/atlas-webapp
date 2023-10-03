@@ -21,8 +21,12 @@ def load_data():
 def style_function(feature):
 	cmap = cm.RdYlGn  # Choose a continuous colormap (11 colors)
 	value = feature['properties']['Score']  # Get the value from your column
-	color = mcolors.rgb2hex(cmap(value))  # Map the value to a color
+	normalized_value = (0.5*value)+0.5
+	color = mcolors.rgb2hex(cmap(normalized_value))  # Map the value to a color
 	return {'color': color}
+	
+def style_function_route(feature):
+	return {'weight': 5}
 
 def calculate_new_column(gdf, ovl, bomen, water, monumenten, wegen, parken):
     # Add your calculation logic here, e.g., using min_value and max_value
@@ -36,7 +40,7 @@ def calculate_new_column(gdf, ovl, bomen, water, monumenten, wegen, parken):
 	return gdf	
 
 #@st.cache_resource
-def create_map(_gdf, _nodes, _df_route = None, route = False):
+def create_map(_gdf, _nodes, _df_route = None, route = False, distance = 0, score = 0):
 	m = folium.Map(location=[_gdf['geometry'].centroid.y.mean(), _gdf['geometry'].centroid.x.mean()], zoom_start=14)
 
 	folium.GeoJson(
@@ -56,8 +60,9 @@ def create_map(_gdf, _nodes, _df_route = None, route = False):
 	
 	if route: 
 		folium.GeoJson(
-			_df_route,
+			_df_route, style_function=style_function_route,
 			name='Route').add_to(m)	
+		st.markdown('**Er is een route gevonden van '+str(round(distance/1000,2))+'km en een gemiddelde score van '+str(round(score,2))+'**')
 		
 	return m
 
@@ -73,18 +78,17 @@ def calculate_route(gdf, start, end, min, max):
  
 	best_solution, distance, score, runtime = looproutes_ant_colony_optimization(a,s,s_norm,start,end,min,max)
 	
-	#route = route_corine = [2921, 2775, 3095, 3097, 2139, 2068, 2019, 2007, 2006, 1977, 1980, 1969, 1978, 1941, 1926, 1853, 1825, 1847, 2498, 1738, 1681, 1682, 1658, 1623, 1615, 1581, 1558, 1557, 1560, 2537, 1539, 2757, 1523, 1498, 1495, 1497, 1479, 1446, 1441, 1445, 1420, 1438, 1419, 1384, 1346, 1321, 1302, 1263, 1253, 1222, 1220, 1221, 2866, 1276, 1184, 1168, 1183, 1199, 1227, 2655, 1193, 2913]
 	df_route = pd.DataFrame({'u' : best_solution})
 	df_route['v'] = df_route.u.shift(-1)
 	df_route = df_route.dropna()
 	df_route = gdf.merge(df_route)
-	return df_route
+	return df_route, distance, score
 
 def main():
 	# Title and description
 	
 	st.title("Loopplezierkaart")
-	st.write("Welkom bij de loopplezierkaart van de Hogeschool van Amsterdam. Kies in het menu links welke omgevingsfactoren je wil laten meewegen in de loopbaarheidsscore. Klik op 'Calculate' en bekijk de kaart (groen is aantrekkelijk, rood minder aantrekkelijk).")
+	st.write("Welkom bij de loopplezierkaart van de Hogeschool van Amsterdam. Kies in het menu links welke omgevingsfactoren je wil laten meewegen in de loopbaarheidsscore. Klik op 'Calculate' en bekijk de kaart (groen is aantrekkelijk, geel is neutraal en rood is minder aantrekkelijk).")
 	st.write("De zwarte puntjes zijn knooppunten met een id. Als je twee knooppunten kiest en de id's invult in het menu kan je ook de meest aantrekkelijke route bereken tussen de twee punten a.d.v. de eerder gekozen score. Klik op 'Add route' om jouw gepersonaliseerde route te tonen")
 	
 	(gdf, nodes) = load_data()
@@ -94,7 +98,10 @@ def main():
 
 	df_route = None
 	route = False
+	distance = 0
+	score = 0
 	calculate_triggered = False
+	
 	with st.sidebar.form("Score input"):	
 		ovl = st.number_input("Score openbare verlichting", -10,10,0,1,  key="ovl")
 		bomen = st.number_input("Score bomen", -10,10,0,1, key="bomen")
@@ -113,20 +120,14 @@ def main():
 			
 	if calculate_button:
 		gdf = calculate_new_column(gdf, ovl, bomen, water, monumenten, wegen, parken)
-		#calculate_triggered = True
 
 	if add_route:
 		gdf = calculate_new_column(gdf, ovl, bomen, water, monumenten, wegen, parken)
-		df_route = calculate_route(gdf, start, end, min_dist, max_dist)
+		df_route, distance, score = calculate_route(gdf, start, end, min_dist, max_dist)
 		route = True
-		#calculate_triggered = True
 	
-	#st.write(calculate_triggered)
-	
-	#if calculate_triggered:
-	folium_static(create_map(gdf, nodes, df_route, route))#, width=800, height=600)
+	folium_static(create_map(gdf, nodes, df_route, route, distance, score), width=1000, height=700)
 
-	calculate_triggered = False
 	route = False
 	
 # Run the app
