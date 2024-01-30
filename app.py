@@ -5,7 +5,8 @@ from streamlit_folium import folium_static
 import folium
 import matplotlib.cm as cm
 import matplotlib.colors as mcolors
-from functions import *
+from functions import * 
+import numpy as np
 
 st.set_page_config(layout = 'wide')
 
@@ -28,9 +29,10 @@ def style_function(feature):
 def style_function_route(feature):
 	return {'weight': 5}
 
-def calculate_new_column(gdf, ovl, bomen, water, monumenten, wegen, parken):
+def calculate_new_column(gdf, ovl, bomen, water, monumenten, wegen, parken, colum_name = 'Score'): 
     # Add your calculation logic here, e.g., using min_value and max_value
-	gdf['Score'] = (gdf['score_ovl']*ovl + 
+	# Score op basis van gewichten ingevuld op streamlit
+	gdf[colum_name] = (gdf['score_ovl']*ovl + 
 					gdf['score_bomen']*bomen + 
 					gdf['score_water']*water + 
 					gdf['score_monumenten']*monumenten + 
@@ -40,7 +42,7 @@ def calculate_new_column(gdf, ovl, bomen, water, monumenten, wegen, parken):
 	return gdf	
 
 #@st.cache_resource
-def create_map(_gdf, _nodes, _df_route = None, route = False, distance = 0, score = 0):
+def create_map(_gdf, _nodes, _df_route = None, route = False, distance = 0, score_origineel = 0, score_2 = 0):
 	m = folium.Map(location=[_gdf['geometry'].centroid.y.mean(), _gdf['geometry'].centroid.x.mean()], zoom_start=14)
 
 	folium.GeoJson(
@@ -62,14 +64,14 @@ def create_map(_gdf, _nodes, _df_route = None, route = False, distance = 0, scor
 		folium.GeoJson(
 			_df_route, style_function=style_function_route,
 			name='Route').add_to(m)	
-		st.markdown('**Er is een route gevonden van '+str(round(distance/1000,2))+'km en een gemiddelde score van '+str(round(score,2))+'**')
-		
+		st.markdown('**Er is een route gevonden van '+str(round(distance/1000,2))+'km en een gemiddelde score van '+str(round(score_origineel,2))
+			  		+ ' (' +str(round(score_2,2)) + ')'+'**' )
+
 	return m
 
 def calculate_route(gdf, start, end, min, max):
-
-	a = gdf.sort_values(['u','v']).pivot(index = 'u', columns = 'v', values = 'length').fillna(100000).values
-	s = gdf.sort_values(['u','v']).pivot(index = 'u', columns = 'v', values = 'Score').fillna(0).values
+	a = gdf.sort_values(['u','v']).pivot(index = 'u', columns = 'v', values = 'length').fillna(100000).values # lengte van de edges
+	s = gdf.sort_values(['u','v']).pivot(index = 'u', columns = 'v', values = 'Score').fillna(0).values # score afhankelijke van selectie
 	s=s*a
 
 	s_norm = s.copy()
@@ -96,10 +98,12 @@ def main():
 	# Sidebar with sliders
 	st.sidebar.header("Map Settings")
 
-	df_route = None
+	# df_route = None
+	df_route = []
 	route = False
 	distance = 0
-	score = 0
+	score_ori = 0
+	score_2 = 0
 	calculate_triggered = False
 	
 	with st.sidebar.form("Score input"):	
@@ -123,10 +127,18 @@ def main():
 
 	if add_route:
 		gdf = calculate_new_column(gdf, ovl, bomen, water, monumenten, wegen, parken)
-		df_route, distance, score = calculate_route(gdf, start, end, min_dist, max_dist)
+		i = 0
+		# Ook bij negatieve scores een route vinden door scores te verhogen.
+		while len(df_route) == 0:
+			df_route, distance, score_ori = calculate_route(gdf.assign(Score=lambda d: d.Score+i), start, end, min_dist, max_dist)
+			i += 1
 		route = True
-	
-	folium_static(create_map(gdf, nodes, df_route, route, distance, score), width=1000, height=700)
+
+		# Bij verhoogde scores willen we de score weten die bij de ingevoerde scores hoort -> score 2
+		df_route = calculate_new_column(df_route, ovl, bomen, water, monumenten, wegen, parken, colum_name = 'Score2')
+		score_2 = np.average(df_route.Score2, weights=df_route.length)
+
+	folium_static(create_map(gdf, nodes, df_route, route, distance, score_ori, score_2), width=1000, height=700)
 
 	route = False
 	
