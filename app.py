@@ -69,22 +69,21 @@ def create_map(_gdf, _nodes, _df_route = None, route = False, distance = 0, scor
 
 	return m
 
-def calculate_route(gdf, start, end, min, max):
-	a = gdf.sort_values(['u','v']).pivot(index = 'u', columns = 'v', values = 'length').fillna(100000).values # lengte van de edges
-	s = gdf.sort_values(['u','v']).pivot(index = 'u', columns = 'v', values = 'Score').fillna(0).values # score afhankelijke van selectie
-	s=s*a
-
-	s_norm = s.copy()
-	s_norm -= np.min(s_norm)
-	s_norm /= np.max(s_norm)
- 
-	best_solution, distance, score, runtime = looproutes_ant_colony_optimization(a,s,s_norm,start,end,min,max)
-	
-	df_route = pd.DataFrame({'u' : best_solution})
-	df_route['v'] = df_route.u.shift(-1)
-	df_route = df_route.dropna()
-	df_route = gdf.merge(df_route)
-	return df_route, distance, score
+def calculate_route(gdf, start, end, g_min, g_max):
+    a = gdf.sort_values(['u','v']).pivot(index = 'u', columns = 'v', values = 'length').fillna(100000).values # lengte van de edges
+    s = gdf.sort_values(['u','v']).pivot(index = 'u', columns = 'v', values = 'Score').fillna(0).values # score afhankelijke van selectie
+    s=s*a
+    
+    a_final,s_final,start_final,end_final,indices = smallMatrices(a,s,g_max,start,end)
+    
+    best_solution, distance, score, runtime = looproutes_ant_colony_optimization(a_final,s_final,start_final,end_final,g_min,g_max)
+    
+    df_route = pd.DataFrame({'u' : best_solution})
+    df_route['v'] = df_route.u.shift(-1)
+    df_route = df_route.dropna()
+    df_route = gdf.merge(df_route)
+    
+    return df_route, distance, score
 
 def main():
 	# Title and description
