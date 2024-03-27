@@ -8,6 +8,7 @@ import time
 import networkx as nx
 import joblib
 
+
 def probabilitiesMoves(a,s,s_norm,i_c,j_e,g_c,g_min,g_max,tabu,tau, alpha, beta, dist_matrix):
     # Bepaal naar welke knooppunten een ant kan bewegen en wat de kans is voor elk knooppunt
     # i_c: huidige node van ant
