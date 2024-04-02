@@ -42,7 +42,7 @@ def calculate_new_column(gdf, ovl, bomen, water, monumenten, wegen, parken, colu
 	return gdf	
 
 #@st.cache_resource
-def create_map(_gdf, _nodes, _df_route = None, route = False, distance = 0, score_origineel = 0, score_2 = 0):
+def create_map(_gdf, _nodes, _df_route = None, route = False, distance = 0, score = 0):
 	m = folium.Map(location=[_gdf['geometry'].centroid.y.mean(), _gdf['geometry'].centroid.x.mean()], zoom_start=14)
 
 	folium.GeoJson(
@@ -64,8 +64,8 @@ def create_map(_gdf, _nodes, _df_route = None, route = False, distance = 0, scor
 		folium.GeoJson(
 			_df_route, style_function=style_function_route,
 			name='Route').add_to(m)	
-		st.markdown('**Er is een route gevonden van '+str(round(distance/1000,2))+'km en een gemiddelde score van '+str(round(score_origineel,2))
-			  		+ ' (' +str(round(score_2,2)) + ')'+'**' )
+		st.markdown('**Er is een route gevonden van '+str(round(distance/1000,2))+'km en een gemiddelde score van '+str(round(score,2))
+			  		+ '**' )
 
 	return m
 
@@ -103,8 +103,7 @@ def main():
 	df_route = []
 	route = False
 	distance = 0
-	score_ori = 0
-	score_2 = 0
+	score = 0
 	calculate_triggered = False
 	
 	with st.sidebar.form("Score input"):	
@@ -136,10 +135,8 @@ def main():
 		route = True
 
 		# Bij verhoogde scores willen we de score weten die bij de ingevoerde scores hoort -> score 2
-		df_route = calculate_new_column(df_route, ovl, bomen, water, monumenten, wegen, parken, colum_name = 'Score2')
-		score_2 = np.average(df_route.Score2, weights=df_route.length)
 
-	folium_static(create_map(gdf, nodes, df_route, route, distance, score_ori, score_2), width=1000, height=700)
+	folium_static(create_map(gdf, nodes, df_route, route, distance, score), width=1000, height=700)
 
 	route = False
 	
