@@ -129,12 +129,8 @@ def main():
 		gdf = calculate_new_column(gdf, ovl, bomen, water, monumenten, wegen, parken)
 		i = 0
 		# Ook bij negatieve scores een route vinden door scores te verhogen.
-		while len(df_route) == 0:
-			df_route, distance, score_ori = calculate_route(gdf.assign(Score=lambda d: d.Score+i), start, end, min_dist, max_dist)
-			i += 1
+		df_route, distance, score = calculate_route(gdf, start, end, min_dist, max_dist)
 		route = True
-
-		# Bij verhoogde scores willen we de score weten die bij de ingevoerde scores hoort -> score 2
 
 	folium_static(create_map(gdf, nodes, df_route, route, distance, score), width=1000, height=700)
 
