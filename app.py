@@ -76,7 +76,9 @@ def calculate_route(gdf, start, end, g_min, g_max):
     
     a_final,s_final,start_final,end_final,indices = smallMatrices(a,s,g_max,start,end)
     
-    best_solution, distance, score, runtime = looproutes_ant_colony_optimization(a_final,s_final,start_final,end_final,g_min,g_max)
+    best_solution_temp, distance, score, runtime = looproutes_ant_colony_optimization(a_final,s_final,start_final,end_final,g_min,g_max)
+    
+    best_solution = indices[best_solution_temp]
     
     df_route = pd.DataFrame({'u' : best_solution})
     df_route['v'] = df_route.u.shift(-1)
