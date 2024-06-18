@@ -29,7 +29,7 @@ def style_function(feature):
 def style_function_route(feature):
 	return {'weight': 5}
 
-def calculate_new_column(gdf, ovl, bomen, water, monumenten, wegen, parken, toiletten, verkeerslichten, wegdekkwaliteit, colum_name = 'Score'): 
+def calculate_new_column(gdf, ovl, bomen, water, monumenten, wegen, parken, toiletten, verkeerslichten, wegdekkwaliteit, horeca, kerk, winkels, ov, colum_name = 'Score'): 
     # Add your calculation logic here, e.g., using min_value and max_value
 	# Score op basis van gewichten ingevuld op streamlit
 	gdf[colum_name] = (gdf['score_ovl']*ovl + 
@@ -40,7 +40,11 @@ def calculate_new_column(gdf, ovl, bomen, water, monumenten, wegen, parken, toil
 					gdf['score_park']*parken + 
 					gdf['score_openbare_toiletten']*toiletten + 
 					gdf['score_verkeerslichten']*verkeerslichten + 
-					gdf['score_wegdekkwaliteit']*wegdekkwaliteit)
+					gdf['score_wegdekkwaliteit']*wegdekkwaliteit + 
+					gdf['score_horeca']*horeca +
+					gdf['score_kerk']*kerk +
+					gdf['score_winkels']*winkels +
+					gdf['score_OV']*ov)
 
 	return gdf	
 
@@ -119,6 +123,10 @@ def main():
 		toiletten = st.number_input("Score toiletten", -10,10,0,1, key="toiletten")
 		verkeerslichten = st.number_input("Score verkeerslichten", -10,10,0,1, key="verkeerslichten")
 		wegdekkwaliteit = st.number_input("Score wegdekkwaliteit", -10,10,0,1, key="wegdekkwaliteit")
+		horeca = st.number_input("Score horeca", -10,10,0,1, key="horeca")
+		kerk = st.number_input("Score kerken", -10,10,0,1, key="kerk")
+		winkels = st.number_input("Score winkels", -10,10,0,1, key="winkels")
+		ov = st.number_input("Score OV", -10,10,0,1, key="ov")
 		calculate_button = st.form_submit_button("Calculate")
 	
 	with st.sidebar.form("Route"):	
@@ -129,10 +137,10 @@ def main():
 		add_route = st.form_submit_button("Add route")
 			
 	if calculate_button:
-		gdf = calculate_new_column(gdf, ovl, bomen, water, monumenten, wegen, parken, toiletten, verkeerslichten, wegdekkwaliteit)
+		gdf = calculate_new_column(gdf, ovl, bomen, water, monumenten, wegen, parken, toiletten, verkeerslichten, wegdekkwaliteit, horeca, kerk, winkels ,ov)
 
 	if add_route:
-		gdf = calculate_new_column(gdf, ovl, bomen, water, monumenten, wegen, parken, toiletten, verkeerslichten, wegdekkwaliteit)
+		gdf = calculate_new_column(gdf, ovl, bomen, water, monumenten, wegen, parken, toiletten, verkeerslichten, wegdekkwaliteit, horeca, kerk, winkels, ov)
 		i = 0
 		# Ook bij negatieve scores een route vinden door scores te verhogen.
 		df_route, distance, score = calculate_route(gdf, start, end, min_dist, max_dist)
