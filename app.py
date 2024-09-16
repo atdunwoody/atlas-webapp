@@ -130,10 +130,10 @@ def main():
 		calculate_button = st.form_submit_button("Calculate")
 	
 	with st.sidebar.form("Route"):	
-		start = st.number_input("Start knooppunt", 0,3100,0,1,  key="start")
-		end = st.number_input("Eind knooppunt", 0,3100,0,1,  key="end")
+		start = st.number_input("Start knooppunt", 0,3100,2913,1,  key="start")
+		end = st.number_input("Eind knooppunt", 0,3100,3045,1,  key="end")
 		min_dist = st.number_input("Minimale afstand", 500,10000,500,100,  key="min_dist")
-		max_dist = st.number_input("Maximale afstand", 500,10000,500,100,  key="max_dist")
+		max_dist = st.number_input("Maximale afstand", 500,10000,3000,100,  key="max_dist")
 		add_route = st.form_submit_button("Add route")
 			
 	if calculate_button:
