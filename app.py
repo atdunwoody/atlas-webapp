@@ -14,6 +14,7 @@ st.set_page_config(layout = 'wide')
 def load_data():
 	gdf = gpd.read_feather('./data/df_full.feather').to_crs('EPSG:4326')
 	gdf = gdf.reset_index(drop = True)
+	gdf = calculate_new_column(gdf, ovl = 0, bomen = 0, water = 1, monumenten = 0, wegen = -1, parken = 1, toiletten = 0, verkeerslichten = 0, wegdekkwaliteit = 0, horeca = 0, kerk = 0, winkels = 0 ,ov = 0)
 	
 	nodes = gpd.read_feather('./data/nodes.feather').to_crs('EPSG:4326')
 	nodes = nodes.reset_index().rename(columns = {'osmid' : 'knooppunt'})
