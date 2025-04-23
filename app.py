@@ -33,19 +33,19 @@ def style_function_route(feature):
 def calculate_new_column(gdf, ovl, bomen, water, monumenten, wegen, parken, toiletten, verkeerslichten, wegdekkwaliteit, horeca, kerk, winkels, ov, colum_name = 'Score'): 
     # Add your calculation logic here, e.g., using min_value and max_value
 	# Score op basis van gewichten ingevuld op streamlit
-	gdf[colum_name] = (gdf['score_ovl']*ovl + 
-					gdf['score_bomen']*bomen + 
-					gdf['score_water']*water + 
+	gdf[colum_name] = (gdf['score_bomen']*bomen + 
+					#gdf['score_ovl']*ovl +
+			   		gdf['score_water']*water + 
 					gdf['score_monumenten']*monumenten + 
 					gdf['score_wegen']*wegen + 
 					gdf['score_park']*parken + 
-					gdf['score_openbare_toiletten']*toiletten + 
+					#gdf['score_openbare_toiletten']*toiletten + 
 					gdf['score_verkeerslichten']*verkeerslichten + 
-					gdf['score_wegdekkwaliteit']*wegdekkwaliteit + 
+					#gdf['score_wegdekkwaliteit']*wegdekkwaliteit + 
 					gdf['score_horeca']*horeca +
-					gdf['score_kerk']*kerk +
-					gdf['score_winkels']*winkels +
-					gdf['score_OV']*ov)
+					#gdf['score_kerk']*kerk +
+					#gdf['score_OV']*ov +
+					gdf['score_winkels']*winkel)
 
 	return gdf	
 
@@ -74,7 +74,15 @@ def create_map(_gdf, _nodes, _df_route = None, route = False, distance = 0, scor
 			name='Route').add_to(m)	
 		st.markdown('**Er is een route gevonden van '+str(round(distance/1000,2))+'km en een gemiddelde score van '+str(round(score,2))
 			  		+ '**' )
-
+	if waarnemingen:
+		bio = gpd.read_feather('data/bio.ftr')
+		geo_df_list = [[point.xy[1][0], point.xy[0][0]] for point in bio.geometry]
+		i = 0
+		for coordinates in geo_df_list:
+			icon_obs = folium.features.CustomIcon('./waarneming.png', icon_size=(30,30))
+			marker = folium.Marker(location=coordinates, popup=f'{bio.iloc[i]["species-html"]}{bio.iloc[i].popup}', icon=icon_obs)
+			marker.add_to(m)
+			i = i+1
 	return m
 
 def calculate_route(gdf, start, end, g_min, g_max):
@@ -115,7 +123,7 @@ def main():
 	calculate_triggered = False
 	
 	with st.sidebar.form("Score input"):	
-		ovl = st.number_input("Score openbare verlichting", -10,10,0,1,  key="ovl")
+		#ovl = st.number_input("Score openbare verlichting", -10,10,0,1,  key="ovl")
 		bomen = st.number_input("Score bomen", -10,10,0,1, key="bomen")
 		water = st.number_input("Score water", -10,10,1,1, key="water")
 		monumenten = st.number_input("Score monumenten", -10,10,0,1, key="monumenten")
@@ -130,6 +138,8 @@ def main():
 		#ov = st.number_input("Score OV", -10,10,0,1, key="ov")
 		calculate_button = st.form_submit_button("Calculate")
 	
+	waarnemingen = st.sidebar.checkbox('Laat waarnemingen van de afgelopen 10 dagen zien', False)
+
 	with st.sidebar.form("Route"):	
 		start = st.number_input("Start knooppunt", 0,3100,2913,1,  key="start")
 		end = st.number_input("Eind knooppunt", 0,3100,3045,1,  key="end")
@@ -138,16 +148,16 @@ def main():
 		add_route = st.form_submit_button("Add route")
 			
 	if calculate_button:
-		gdf = calculate_new_column(gdf, ovl = ovl, bomen = bomen, water = water, monumenten = monumenten, wegen = wegen, parken = parken, toiletten = 0, verkeerslichten = verkeerslichten, wegdekkwaliteit = 0, horeca = horeca, kerk = 0, winkels = winkels ,ov = 0)
+		gdf = calculate_new_column(gdf, ovl = 0, bomen = bomen, water = water, monumenten = monumenten, wegen = wegen, parken = parken, toiletten = 0, verkeerslichten = verkeerslichten, wegdekkwaliteit = 0, horeca = horeca, kerk = 0, winkels = winkels ,ov = 0)
 
 	if add_route:
-		gdf = calculate_new_column(gdf, ovl = ovl, bomen = bomen, water = water, monumenten = monumenten, wegen = wegen, parken = parken, toiletten = 0, verkeerslichten = verkeerslichten, wegdekkwaliteit = 0, horeca = horeca, kerk = 0, winkels = winkels ,ov = 0)
+		gdf = calculate_new_column(gdf, ovl = 0, bomen = bomen, water = water, monumenten = monumenten, wegen = wegen, parken = parken, toiletten = 0, verkeerslichten = verkeerslichten, wegdekkwaliteit = 0, horeca = horeca, kerk = 0, winkels = winkels ,ov = 0)
 		i = 0
 		# Ook bij negatieve scores een route vinden door scores te verhogen.
 		df_route, distance, score = calculate_route(gdf, start, end, min_dist, max_dist)
 		route = True
 
-	folium_static(create_map(gdf, nodes, df_route, route, distance, score), width=1000, height=700)
+	folium_static(create_map(gdf, nodes, df_route, route, waarnemingen, distance, score), width=1000, height=700)
 
 	route = False
 	
