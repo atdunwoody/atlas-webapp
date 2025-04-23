@@ -50,7 +50,7 @@ def calculate_new_column(gdf, ovl, bomen, water, monumenten, wegen, parken, toil
 	return gdf	
 
 #@st.cache_resource
-def create_map(_gdf, _nodes, _df_route = None, route = False, distance = 0, score = 0):
+def create_map(_gdf, _nodes, _df_route = None, route = False, waarnemingen = False, distance = 0, score = 0):
 	m = folium.Map(location=[_gdf['geometry'].centroid.y.mean(), _gdf['geometry'].centroid.x.mean()], zoom_start=14)
 
 	folium.GeoJson(
