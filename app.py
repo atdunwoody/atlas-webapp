@@ -135,7 +135,7 @@ def main():
 		#wegdekkwaliteit = st.number_input("Score wegdekkwaliteit", -10,10,0,1, key="wegdekkwaliteit")
 		horeca = st.number_input("Score horeca", -10,10,0,1, key="horeca")
 		#kerk = st.number_input("Score kerken", -10,10,0,1, key="kerk")
-		winkel = st.number_input("Score winkels", -10,10,0,1, key="winkels")
+		winkel = st.number_input("Score winkels", -10,10,0,1, key="winkel")
 		#ov = st.number_input("Score OV", -10,10,0,1, key="ov")
 		calculate_button = st.form_submit_button("Calculate")
 	
@@ -149,10 +149,10 @@ def main():
 		add_route = st.form_submit_button("Add route")
 			
 	if calculate_button:
-		gdf = calculate_new_column(gdf, ovl = 0, bomen = bomen, water = water, monumenten = monumenten, wegen = wegen, parken = parken, toiletten = 0, verkeerslichten = verkeerslichten, wegdekkwaliteit = 0, horeca = horeca, kerk = 0, winkels = winkels ,ov = 0)
+		gdf = calculate_new_column(gdf, ovl = 0, bomen = bomen, water = water, monumenten = monumenten, wegen = wegen, parken = parken, toiletten = 0, verkeerslichten = verkeerslichten, wegdekkwaliteit = 0, horeca = horeca, kerk = 0, winkel = winkel ,ov = 0)
 
 	if add_route:
-		gdf = calculate_new_column(gdf, ovl = 0, bomen = bomen, water = water, monumenten = monumenten, wegen = wegen, parken = parken, toiletten = 0, verkeerslichten = verkeerslichten, wegdekkwaliteit = 0, horeca = horeca, kerk = 0, winkels = winkels ,ov = 0)
+		gdf = calculate_new_column(gdf, ovl = 0, bomen = bomen, water = water, monumenten = monumenten, wegen = wegen, parken = parken, toiletten = 0, verkeerslichten = verkeerslichten, wegdekkwaliteit = 0, horeca = horeca, kerk = 0, winkel = winkel ,ov = 0)
 		i = 0
 		# Ook bij negatieve scores een route vinden door scores te verhogen.
 		df_route, distance, score = calculate_route(gdf, start, end, min_dist, max_dist)
