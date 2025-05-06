@@ -135,7 +135,7 @@ def main():
 		#wegdekkwaliteit = st.number_input("Score wegdekkwaliteit", -10,10,0,1, key="wegdekkwaliteit")
 		horeca = st.number_input("Score horeca", -10,10,0,1, key="horeca")
 		#kerk = st.number_input("Score kerken", -10,10,0,1, key="kerk")
-		winkels = st.number_input("Score winkels", -10,10,0,1, key="winkels")
+		winkel = st.number_input("Score winkels", -10,10,0,1, key="winkels")
 		#ov = st.number_input("Score OV", -10,10,0,1, key="ov")
 		calculate_button = st.form_submit_button("Calculate")
 	
