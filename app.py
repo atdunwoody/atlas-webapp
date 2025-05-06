@@ -14,7 +14,7 @@ st.set_page_config(layout = 'wide')
 def load_data():
 	gdf = gpd.read_feather('./data/df_full.feather').to_crs('EPSG:4326')
 	gdf = gdf.reset_index(drop = True)
-	gdf = calculate_new_column(gdf, ovl = 0, bomen = 0, water = 1, monumenten = 0, wegen = -1, parken = 1, toiletten = 0, verkeerslichten = 0, wegdekkwaliteit = 0, horeca = 0, kerk = 0, winkels = 0 ,ov = 0)
+	gdf = calculate_new_column(gdf, ovl = 0, bomen = 0, water = 1, monumenten = 0, wegen = -1, parken = 1, toiletten = 0, verkeerslichten = 0, wegdekkwaliteit = 0, horeca = 0, kerk = 0, winkel = 0 ,ov = 0)
 	
 	nodes = gpd.read_feather('./data/nodes.feather').to_crs('EPSG:4326')
 	nodes = nodes.reset_index().rename(columns = {'osmid' : 'knooppunt'})
@@ -30,7 +30,7 @@ def style_function(feature):
 def style_function_route(feature):
 	return {'weight': 5}
 
-def calculate_new_column(gdf, ovl, bomen, water, monumenten, wegen, parken, toiletten, verkeerslichten, wegdekkwaliteit, horeca, kerk, winkels, ov, colum_name = 'Score'): 
+def calculate_new_column(gdf, ovl, bomen, water, monumenten, wegen, parken, toiletten, verkeerslichten, wegdekkwaliteit, horeca, kerk, winkel, ov, colum_name = 'Score'): 
     # Add your calculation logic here, e.g., using min_value and max_value
 	# Score op basis van gewichten ingevuld op streamlit
 	gdf[colum_name] = (gdf['score_bomen']*bomen + 
