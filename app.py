@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import geopandas as gpd
-from streamlit_folium import folium_static
+from streamlit_folium import st_folium
 import folium
 import matplotlib.cm as cm
 import matplotlib.colors as mcolors
@@ -12,9 +12,9 @@ st.set_page_config(layout = 'wide')
 
 @st.cache_data
 def load_data():
-	gdf = gpd.read_feather('./data/df_full.feather').to_crs('EPSG:4326')
+	gdf = gpd.read_feather('./data/df_full_groen_bomen_bio.ftr').to_crs('EPSG:4326')
 	gdf = gdf.reset_index(drop = True)
-	gdf = calculate_new_column(gdf, ovl = 0, bomen = 0, water = 1, monumenten = 0, wegen = -1, parken = 1, toiletten = 0, verkeerslichten = 0, wegdekkwaliteit = 0, horeca = 0, kerk = 0, winkel = 0 ,ov = 0)
+	gdf = calculate_new_column(gdf, ovl = 0, bomen = 0, water = 0, monumenten = 0, wegen = -1, parken = 0, toiletten = 0, verkeerslichten = 0, wegdekkwaliteit = 0, horeca = 0, kerk = 0, winkels = 0, groen = 1, kampioen = 0, waarnemingen = 2 ,ov = 0)
 	
 	nodes = gpd.read_feather('./data/nodes.feather').to_crs('EPSG:4326')
 	nodes = nodes.reset_index().rename(columns = {'osmid' : 'knooppunt'})
@@ -30,12 +30,13 @@ def style_function(feature):
 def style_function_route(feature):
 	return {'weight': 5}
 
-def calculate_new_column(gdf, ovl, bomen, water, monumenten, wegen, parken, toiletten, verkeerslichten, wegdekkwaliteit, horeca, kerk, winkel, ov, colum_name = 'Score'): 
+def calculate_new_column(gdf, ovl, bomen, water, monumenten, wegen, parken, toiletten, verkeerslichten, wegdekkwaliteit, horeca, kerk, winkels, groen, kampioen, waarnemingen, ov, colum_name = 'Score'): 
     # Add your calculation logic here, e.g., using min_value and max_value
 	# Score op basis van gewichten ingevuld op streamlit
-	gdf[colum_name] = (gdf['score_bomen']*bomen + 
-					#gdf['score_ovl']*ovl +
-			   		gdf['score_water']*water + 
+	gdf[colum_name] = (
+					gdf['score_bomen']*bomen + 
+					#gdf['score_ovl']*ovl + 
+					gdf['score_water']*water + 
 					gdf['score_monumenten']*monumenten + 
 					gdf['score_wegen']*wegen + 
 					gdf['score_park']*parken + 
@@ -45,8 +46,10 @@ def calculate_new_column(gdf, ovl, bomen, water, monumenten, wegen, parken, toil
 					gdf['score_horeca']*horeca +
 					#gdf['score_kerk']*kerk +
 					#gdf['score_OV']*ov +
-					gdf['score_winkels']*winkel)
-
+					gdf['score_buffergebied']*groen +
+					gdf['score_kampioensbomen']*kampioen +
+					gdf['score_waarnemingen']*waarnemingen +
+					gdf['score_winkels']*winkels)
 	return gdf	
 
 #@st.cache_resource
@@ -74,12 +77,15 @@ def create_map(_gdf, _nodes, _df_route = None, route = False, waarnemingen = Fal
 			name='Route').add_to(m)	
 		st.markdown('**Er is een route gevonden van '+str(round(distance/1000,2))+'km en een gemiddelde score van '+str(round(score,2))
 			  		+ '**' )
+		if score == -10: ###
+			st.markdown("Niet mogelijk om alle waypoints te bezoeken") ###
+    
 	if waarnemingen:
 		bio = gpd.read_feather('data/bio.ftr')
 		geo_df_list = [[point.xy[1][0], point.xy[0][0]] for point in bio.geometry]
 		i = 0
 		for coordinates in geo_df_list:
-			icon_obs = folium.features.CustomIcon('data/waarneming.png', icon_size=(30,30))
+			icon_obs = folium.features.CustomIcon('./waarneming.png', icon_size=(30,30))
 			marker = folium.Marker(location=coordinates, popup=f'{bio.iloc[i]["species-html"]}{bio.iloc[i].popup}', icon=icon_obs)
 			marker.add_to(m)
 			i = i+1
@@ -114,7 +120,7 @@ def main():
 	(gdf, nodes) = load_data()
 	
 	# Sidebar with sliders
-	st.sidebar.header("Map Settings")
+	st.sidebar.header("Map settings")
 
 	# df_route = None
 	df_route = []
@@ -126,16 +132,19 @@ def main():
 	with st.sidebar.form("Score input"):	
 		#ovl = st.number_input("Score openbare verlichting", -10,10,0,1,  key="ovl")
 		bomen = st.number_input("Score bomen", -10,10,0,1, key="bomen")
-		water = st.number_input("Score water", -10,10,1,1, key="water")
+		water = st.number_input("Score water", -10,10,0,1, key="water")
 		monumenten = st.number_input("Score monumenten", -10,10,0,1, key="monumenten")
 		wegen = st.number_input("Score drukke wegen", -10,10,-1,1, key="wegen")
-		parken = st.number_input("Score parken", -10,10,1,1, key="parken")
+		parken = st.number_input("Score parken", -10,10,0,1, key="parken")
 		#toiletten = st.number_input("Score toiletten", -10,10,0,1, key="toiletten")
 		verkeerslichten = st.number_input("Score verkeerslichten", -10,10,0,1, key="verkeerslichten")
 		#wegdekkwaliteit = st.number_input("Score wegdekkwaliteit", -10,10,0,1, key="wegdekkwaliteit")
 		horeca = st.number_input("Score horeca", -10,10,0,1, key="horeca")
 		#kerk = st.number_input("Score kerken", -10,10,0,1, key="kerk")
-		winkel = st.number_input("Score winkels", -10,10,0,1, key="winkel")
+		winkels = st.number_input("Score winkels", -10,10,0,1, key="winkels")
+		groen = st.number_input("Score groen", -10,10,1,1, key="groen")
+		kampioen = st.number_input("Score kampioensbomen", -10,10,0,1, key="kampioen")
+		waarnemingen = st.number_input("Score waarnemingen", -10,10,2,1, key="waarnemingen")
 		#ov = st.number_input("Score OV", -10,10,0,1, key="ov")
 		calculate_button = st.form_submit_button("Calculate")
 	
@@ -146,19 +155,20 @@ def main():
 		end = st.number_input("Eind knooppunt", 0,3100,3045,1,  key="end")
 		min_dist = st.number_input("Minimale afstand", 500,10000,500,100,  key="min_dist")
 		max_dist = st.number_input("Maximale afstand", 500,10000,3000,100,  key="max_dist")
+
 		add_route = st.form_submit_button("Add route")
 			
 	if calculate_button:
-		gdf = calculate_new_column(gdf, ovl = 0, bomen = bomen, water = water, monumenten = monumenten, wegen = wegen, parken = parken, toiletten = 0, verkeerslichten = verkeerslichten, wegdekkwaliteit = 0, horeca = horeca, kerk = 0, winkel = winkel ,ov = 0)
+		gdf = calculate_new_column(gdf, ovl = 0, bomen = bomen, water = water, monumenten = monumenten, wegen = wegen, parken = parken, toiletten = 0, verkeerslichten = verkeerslichten, wegdekkwaliteit = 0, horeca = horeca, kerk = 0, winkels = winkels ,groen = groen, kampioen = kampioen, waarnemingen = waarnemingen, ov = 0)
 
 	if add_route:
-		gdf = calculate_new_column(gdf, ovl = 0, bomen = bomen, water = water, monumenten = monumenten, wegen = wegen, parken = parken, toiletten = 0, verkeerslichten = verkeerslichten, wegdekkwaliteit = 0, horeca = horeca, kerk = 0, winkel = winkel ,ov = 0)
+		gdf = calculate_new_column(gdf, ovl = 0, bomen = bomen, water = water, monumenten = monumenten, wegen = wegen, parken = parken, toiletten = 0, verkeerslichten = verkeerslichten, wegdekkwaliteit = 0, horeca = horeca, kerk = 0, winkels = winkels ,groen = groen, kampioen = kampioen, waarnemingen = waarnemingen, ov = 0)
 		i = 0
 		# Ook bij negatieve scores een route vinden door scores te verhogen.
 		df_route, distance, score = calculate_route(gdf, start, end, min_dist, max_dist)
 		route = True
 
-	folium_static(create_map(gdf, nodes, df_route, route, waarnemingen, distance, score), width=1000, height=700)
+	st_folium(create_map(gdf, nodes, df_route, route, waarnemingen, distance, score), width=1000, height=700, returned_objects=[])
 
 	route = False
 	
