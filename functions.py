@@ -112,7 +112,7 @@ def SelectMove(a,s_norm,i_c,j_e,g_c,g_min,g_max,tabu,tau, alpha, beta, dist_matr
 
 
 	
-# def looproutes_ant_colony_optimization(a,s,s_norm,i_s,j_e,g_min,g_max,n_ants = 200,n_iter = 12,alpha = 0.5,beta =0.5,rho = 0.5,Q3 = 1,paths = []):
+# def looproutes_ant_colony_optimization(a,s,s_norm,i_s,j_e,g_min,g_max,n_ants = 500,n_iter = 20,alpha = 0.5,beta =0.5,rho = 0.5,Q3 = 1,paths = []):
 #     # ant colony optimization om looproutes te bepalen
 #     n = a.shape[0]
     
