@@ -37,10 +37,15 @@ def create_map(gdf, field, threshold=None):
             'fillOpacity': 0.7,
         }
 
-    bounds = gdf.total_bounds
-    center = [(bounds[1] + bounds[3]) / 2, (bounds[0] + bounds[2]) / 2]
+    # Define fixed extent
+    extent = [
+        [44.95588104611764, -118.74003621179101],  # southwest corner (lat, lon)
+        [45.88223081618968, -117.48221656753968]   # northeast corner (lat, lon)
+    ]
 
-    m = folium.Map(location=center, zoom_start=12)
+    m = folium.Map()
+    m.fit_bounds(extent)
+
     folium.GeoJson(
         gdf,
         style_function=style_function,
