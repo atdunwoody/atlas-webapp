@@ -22,7 +22,7 @@ def create_map(gdf, field, threshold=None):
 
     def style_function(feature):
         value = feature['properties'][field]
-        if threshold is not None and feature['properties'].get("Ch_miles", float("inf")) < threshold:
+        if threshold is not None and feature['properties'].get("Ch_Miles", float("inf")) < threshold:
             return {
                 'fillColor': 'lightgrey',
                 'color': 'black',
