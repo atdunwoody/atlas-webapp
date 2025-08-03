@@ -72,13 +72,13 @@ def main():
 
     selected_field = st.selectbox("Select a field to visualize:", numeric_fields)
 
-    if "Ch_miles" not in gdf.columns:
-        st.warning("'Ch_miles' field not found. Grey-masking will be skipped.")
+    if "Ch_Miles" not in gdf.columns:
+        st.warning("'Ch_Miles' field not found. Grey-masking will be skipped.")
         threshold = None
     else:
-        threshold = st.slider("Threshold for Ch_miles (polygons below this will be grey):",
-                              float(gdf["Ch_miles"].min()), float(gdf["Ch_miles"].max()),
-                              float(gdf["Ch_miles"].mean()))
+        threshold = st.slider("Threshold for Ch_Miles (polygons below this will be grey):",
+                              float(gdf["Ch_Miles"].min()), float(gdf["Ch_Miles"].max()),
+                              float(gdf["Ch_Miles"].mean()))
 
     m = create_map(gdf, selected_field, threshold)
     st_folium(m, width=1000, height=700)
