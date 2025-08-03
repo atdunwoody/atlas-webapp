@@ -66,7 +66,7 @@ def create_map(gdf, field, threshold=None):
 def main():
     st.title("BSR Analysis Map Viewer")
 
-    shapefile_path = "data/BSR_Analysis_DMS.shp"
+    shapefile_path = "data/BSR_very_simple_WGS84.shp"
     gdf = load_shapefile(shapefile_path)
 
     numeric_fields = get_numeric_columns(gdf)
