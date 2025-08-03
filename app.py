@@ -22,11 +22,14 @@ def create_map(gdf, field, threshold=None):
 
     def style_function(feature):
         value = feature['properties'][field]
-        ch_val = feature['properties'].get('Ch_miles', None)
-        if threshold is not None and ch_val is not None and ch_val < threshold:
-            color = 'grey'
-        else:
-            color = mcolors.rgb2hex(cmap(norm(value)))
+        if threshold is not None and feature['properties'].get("Ch_miles", float("inf")) < threshold:
+            return {
+                'fillColor': 'lightgrey',
+                'color': 'black',
+                'weight': 0.5,
+                'fillOpacity': 0.7,
+            }
+        color = mcolors.rgb2hex(cmap(norm(value)))
         return {
             'fillColor': color,
             'color': 'black',
@@ -34,23 +37,19 @@ def create_map(gdf, field, threshold=None):
             'fillOpacity': 0.7,
         }
 
-    m = folium.Map(tiles="CartoDB positron", zoom_start=12)
+    bounds = gdf.total_bounds
+    center = [(bounds[1] + bounds[3]) / 2, (bounds[0] + bounds[2]) / 2]
 
-    geojson = folium.GeoJson(
+    m = folium.Map(location=center, zoom_start=12)
+    folium.GeoJson(
         gdf,
         style_function=style_function,
-        tooltip=folium.GeoJsonTooltip(fields=[field, "Ch_miles"], aliases=[f'{field}:', 'Ch_miles:'], sticky=True)
-    )
-    geojson.add_to(m)
-
-    # Auto-zoom to bounds
-    bounds = [[gdf.bounds.miny.min(), gdf.bounds.minx.min()],
-              [gdf.bounds.maxy.max(), gdf.bounds.maxx.max()]]
-    m.fit_bounds(bounds)
+        tooltip=folium.GeoJsonTooltip(fields=[field], aliases=[f'{field}:'], sticky=True)
+    ).add_to(m)
 
     # Add colorbar legend
     colormap = bcm.LinearColormap(
-        colors=[mcolors.rgb2hex(cmap(i)) for i in [0, 0.5, 1]],
+        colors=[mcolors.rgb2hex(cmap(x)) for x in [0, 0.25, 0.5, 0.75, 1.0]],
         vmin=gdf[field].min(),
         vmax=gdf[field].max(),
         caption=field
@@ -73,13 +72,15 @@ def main():
 
     selected_field = st.selectbox("Select a field to visualize:", numeric_fields)
 
-    ch_slider = None
-    if 'Ch_miles' in gdf.columns:
-        min_val, max_val = float(gdf['Ch_miles'].min()), float(gdf['Ch_miles'].max())
-        ch_slider = st.slider("Ch_miles threshold (values below will be greyed out):", 
-                              min_value=min_val, max_value=max_val, value=min_val)
+    if "Ch_miles" not in gdf.columns:
+        st.warning("'Ch_miles' field not found. Grey-masking will be skipped.")
+        threshold = None
+    else:
+        threshold = st.slider("Threshold for Ch_miles (polygons below this will be grey):",
+                              float(gdf["Ch_miles"].min()), float(gdf["Ch_miles"].max()),
+                              float(gdf["Ch_miles"].mean()))
 
-    m = create_map(gdf, selected_field, threshold=ch_slider)
+    m = create_map(gdf, selected_field, threshold)
     st_folium(m, width=1000, height=700)
 
 if __name__ == "__main__":
