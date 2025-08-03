@@ -1,8 +1,22 @@
-# Loopplezierkaart
+# BSR Analysis Map Viewer
 
-Welkom bij de loopplezier app van de Hogeschool van Amsterdam. De app is publiek toegankelijk via https://loopplezierhva.streamlit.app/. Om deze lokaal te draaien kan je de repository clonen, installeer de packages in requirements.txt + streamlit en streamlit-folium en dan uitvoeren via `streamlit run app.py`. 
+This is a simple Streamlit web application that displays a shapefile (`BSR_Analysis_DMS.shp`) on an interactive map. The app allows users to select a numeric field from the shapefile to visualize using a color gradient.
 
-De app toont een kaart van Amsterdam waarbij je kan kiezen uit verschillende omgevingsfactoren die je aantrekkelijk of juist onaantrekkelijk vindt. Vervolgens kan je een gepersonaliseerde route tussen twee knooppunten bepalen gegeven een minimum en een maximum afstand. 
+## Features
 
+- Loads and displays the shapefile on a Folium map
+- Dropdown menu to select any numeric field
+- Color-coded symbology based on the selected field
+- Interactive tooltips showing the selected value per feature
 
-![image](https://github.com/DatalabHvA/loopplezier/assets/43748923/8b0abb16-f2b7-4123-82f0-c1f1539e59cb)
+## Requirements
+
+- Python 3.8+
+- Streamlit
+- Geopandas
+- Folium
+- streamlit-folium
+- matplotlib
+
+> Note: All required packages must be pre-installed.
+
