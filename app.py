@@ -23,9 +23,6 @@ def list_layers(gpkg_path: str) -> List[str]:
     Return available layers in a GeoPackage.
     Raises FileNotFoundError / ValueError with informative message.
     """
-    p = Path(gpkg_path)
-    if not p.exists():
-        raise FileNotFoundError(f"GPKG not found: {gpkg_path}")
     try:
         layers = fiona.listlayers(gpkg_path)
     except Exception as e:
