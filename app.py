@@ -205,12 +205,12 @@ def create_map(
 # Streamlit UI
 # -------------------------
 def main():
-    st.title("BSR Analysis Map Viewer (GPKG)")
+    st.title("BSR Analysis Map Viewer")
 
     # Path input (editable) — default to a plausible workspace path
     gpkg_path = st.text_input(
         "GeoPackage path",
-        value=r"data\outputs\base_bsr_with_temp.gpkg",
+        value=r"data\base_bsr_with_temp.gpkg",
         help="Enter path to a GeoPackage with multiple layers."
     )
 
