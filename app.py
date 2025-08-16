@@ -12,7 +12,6 @@ import matplotlib.colors as mcolors
 import branca.colormap as bcm
 import fiona
 
-
 st.set_page_config(layout="wide")
 
 
@@ -20,21 +19,14 @@ st.set_page_config(layout="wide")
 # Path utilities & validation
 # -------------------------
 def resolve_gpkg_path(raw_path: str) -> Path:
-    """
-    Normalize a path from user input across OSes.
-    - Converts Windows backslashes to POSIX.
-    - Resolves relative to CWD.
-    - Validates existence.
-    """
+    """Normalize and validate a path across OSes."""
     if not raw_path:
         raise FileNotFoundError("No GeoPackage path provided.")
     p = Path(raw_path.replace("\\", "/")).expanduser()
     if not p.is_absolute():
         p = Path.cwd() / p
     if not p.exists():
-        raise FileNotFoundError(
-            f"GPKG not found: {p}\n(Working directory: {Path.cwd()})"
-        )
+        raise FileNotFoundError(f"GPKG not found: {p}\n(Working directory: {Path.cwd()})")
     if not p.is_file():
         raise FileNotFoundError(f"Path is not a file: {p}")
     return p
@@ -45,10 +37,7 @@ def resolve_gpkg_path(raw_path: str) -> Path:
 # -------------------------
 @st.cache_data
 def list_layers(gpkg_path: str) -> List[str]:
-    """
-    Return available layers in a GeoPackage.
-    Raises FileNotFoundError / ValueError with informative message.
-    """
+    """Return available layers in a GeoPackage."""
     p = resolve_gpkg_path(gpkg_path)
     try:
         layers = fiona.listlayers(str(p))
@@ -61,10 +50,7 @@ def list_layers(gpkg_path: str) -> List[str]:
 
 @st.cache_data
 def load_layer(gpkg_path: str, layer: str) -> gpd.GeoDataFrame:
-    """
-    Read a layer from a GPKG and reproject to EPSG:4326 for web mapping.
-    Preserves source CRS internally; converts only for display.
-    """
+    """Read a layer and reproject to EPSG:4326 for web mapping."""
     p = resolve_gpkg_path(gpkg_path)
     try:
         gdf = gpd.read_file(str(p), layer=layer)
@@ -105,16 +91,28 @@ def create_map(
     *,
     hatch_on_missing: bool = True
 ) -> folium.Map:
-    """Folium choropleth with grey-below-threshold and white for missing temp medians."""
+    """
+    Folium choropleth with:
+      - Color by `field`
+      - Grey where value < threshold
+      - White/dashed where either median field is null
+    """
     vmin, vmax = numeric_min_max(gdf[field])
+
+    # Handle degenerate range for color normalization & legend
+    if math.isclose(vmin, vmax, rel_tol=0, abs_tol=1e-12):
+        pad = max(abs(vmin) * 0.01, 1e-6)  # small symmetric padding
+        vmin_c, vmax_c = vmin - pad, vmax + pad
+    else:
+        vmin_c, vmax_c = vmin, vmax
+
     cmap = cm.viridis
-    norm = mcolors.Normalize(vmin=vmin, vmax=vmax)
+    norm = mcolors.Normalize(vmin=vmin_c, vmax=vmax_c)
 
     def style_function(feature):
         props = feature["properties"]
         v = props.get(field, None)
 
-        # detect missing temp medians
         def to_float(x):
             try:
                 return float(x)
@@ -156,7 +154,7 @@ def create_map(
 
     bcm.LinearColormap(
         colors=[mcolors.rgb2hex(cmap(x)) for x in [0.0, 0.25, 0.5, 0.75, 1.0]],
-        vmin=vmin, vmax=vmax, caption=field
+        vmin=vmin_c, vmax=vmax_c, caption=field
     ).add_to(m)
 
     legend_html = """
@@ -177,13 +175,11 @@ def create_map(
 def main() -> None:
     st.title("BSR Analysis Map Viewer")
 
-    # Optional upload (works on Streamlit Cloud); else use path input
     uploaded = st.file_uploader("Upload a GeoPackage (optional)", type=["gpkg"])
-    gpkg_default = "data/base_bsr_with_temp.gpkg"  # use forward slashes for Linux
+    gpkg_default = "data/base_bsr_with_temp.gpkg"
     gpkg_input = st.text_input("GeoPackage path", value=gpkg_default,
                                help="If not uploading, provide a path relative to app root.")
 
-    gpkg_path: Optional[str] = None
     if uploaded is not None:
         tmp_path = Path("/tmp") / uploaded.name
         with open(tmp_path, "wb") as f:
@@ -209,7 +205,7 @@ def main() -> None:
         st.error(str(e))
         st.stop()
 
-    # Field selection restricted to the two requested fields if present
+    # Field selection
     candidate_fields = [f for f in ["S30_2040D_median", "S32_2080D_median"] if f in gdf.columns]
     if not candidate_fields:
         st.error("Neither 'S30_2040D_median' nor 'S32_2080D_median' found in this layer.")
@@ -217,7 +213,7 @@ def main() -> None:
 
     sel_field = st.selectbox("Select temperature field:", candidate_fields, index=0)
 
-    # Threshold slider on the selected field
+    # Threshold slider with degenerate-range guard
     try:
         vmin, vmax = numeric_min_max(gdf[sel_field])
         default_val = float(pd.to_numeric(gdf[sel_field], errors="coerce").dropna().median())
@@ -225,13 +221,18 @@ def main() -> None:
         st.error(f"Cannot compute slider bounds for '{sel_field}': {e}")
         st.stop()
 
-    threshold = st.slider(
-        f"Threshold for {sel_field} (polygons below render grey):",
-        min_value=float(vmin),
-        max_value=float(vmax),
-        value=float(default_val),
-        step=(vmax - vmin) / 100.0 if vmax > vmin else 1.0,
-    )
+    if math.isclose(vmin, vmax, rel_tol=0, abs_tol=1e-12):
+        st.info(f"All '{sel_field}' values are identical ({vmin:.3f}). Threshold slider disabled.")
+        threshold = float(vmin)
+    else:
+        step = max((vmax - vmin) / 100.0, 1e-6)
+        threshold = st.slider(
+            f"Threshold for {sel_field} (polygons below render grey):",
+            min_value=float(vmin),
+            max_value=float(vmax),
+            value=float(default_val),
+            step=step,
+        )
 
     # Render map
     m = create_map(gdf, sel_field, threshold)
