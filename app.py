@@ -6,11 +6,48 @@ import numpy as np
 import matplotlib.cm as cm
 import matplotlib.colors as mcolors
 import branca.colormap as bcm
-import fiona
 
 st.set_page_config(layout="wide")
 
 ALLOWED_FIELDS = ("S30_2040D_median", "S32_2080D_median")
+
+import sqlite3
+from pathlib import Path
+import geopandas as gpd
+import numpy as np
+
+def list_gpkg_layers(gpkg_path: str) -> list[str]:
+    """
+    Return feature layer names from a GeoPackage by querying gpkg_contents.
+    No GDAL/Fiona dependency.
+    """
+    p = Path(gpkg_path)
+    if not p.exists():
+        raise FileNotFoundError(f"GeoPackage not found: {gpkg_path}")
+    with sqlite3.connect(str(p)) as conn:
+        rows = conn.execute(
+            "SELECT table_name FROM gpkg_contents WHERE data_type='features'"
+        ).fetchall()
+    if not rows:
+        raise ValueError(f"No feature layers found in {gpkg_path}")
+    return [r[0] for r in rows]
+
+def read_layer(gpkg_path: str, layer: str):
+    """
+    Read a single GPKG layer; prefer pyogrio if present, else fall back.
+    Reprojects to EPSG:4326 for web mapping.
+    """
+    try:
+        gdf = gpd.read_file(gpkg_path, layer=layer, engine="pyogrio")
+    except Exception:
+        # Fall back to default engine without forcing Fiona import here
+        gdf = gpd.read_file(gpkg_path, layer=layer)
+    if gdf.empty:
+        raise ValueError(f"Layer '{layer}' is empty.")
+    try:
+        return gdf.to_crs(epsg=4326)
+    except Exception as e:
+        raise RuntimeError("Failed to reproject to EPSG:4326.") from e
 
 def _is_null(v) -> bool:
     """True if v is None/NaN-like without importing pandas in the style callback."""
@@ -20,7 +57,7 @@ def _is_null(v) -> bool:
 def list_layers(gpkg_path: str) -> list[str]:
     """Return layer names in the GeoPackage."""
     try:
-        return list(fiona.listlayers(gpkg_path))
+        return list(list_gpkg_layers(gpkg_path))
     except Exception as e:
         raise RuntimeError(f"Failed to list layers in '{gpkg_path}'.") from e
 

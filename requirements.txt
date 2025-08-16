@@ -1,4 +1,3 @@
-fiona
 matplotlib
 folium
 geopandas
