@@ -158,10 +158,10 @@ def create_map(
     ).add_to(m)
 
     legend_html = """
-    <div style="position: fixed; bottom: 30px; left: 10px; z-index: 9999; background: white; padding: 8px 10px; border: 1px solid #bbb; border-radius: 4px; font-size: 12px;">
+    <div style="position: fixed; bottom: 50px; left: 10px; z-index: 9999; background: white; padding: 8px 10px; border: 1px solid #bbb; border-radius: 4px; font-size: 12px;">
       <div style="margin-bottom:4px;"><b>Symbology</b></div>
-      <div><span style="display:inline-block;width:14px;height:14px;border:1px dashed #000;background:#fff;opacity:0.6;margin-right:6px;"></span> No temperature data</div>
-      <div><span style="display:inline-block;width:14px;height:14px;background:#bdbdbd;border:1px solid #666;margin-right:6px;"></span> Below threshold</div>
+      <div><span style="display:inline-block;width:14px;height:14px;border:1px dashed #000;background:#fff;opacity:0.6;margin-right:6px;"></span> Fish run not present in BSR </div>
+      <div><span style="display:inline-block;width:14px;height:14px;background:#bdbdbd;border:1px solid #666;margin-right:6px;"></span> Below temperature threshold</div>
     </div>
     """
     m.get_root().html.add_child(folium.Element(legend_html))
@@ -176,7 +176,7 @@ def main() -> None:
     st.title("BSR Analysis Map Viewer")
 
     uploaded = st.file_uploader("Upload a GeoPackage (optional)", type=["gpkg"])
-    gpkg_default = "data/base_bsr_with_temp.gpkg"
+    gpkg_default = "data/outputs/base_bsr_with_temp.gpkg"
     gpkg_input = st.text_input("GeoPackage path", value=gpkg_default,
                                help="If not uploading, provide a path relative to app root.")
 
@@ -196,7 +196,7 @@ def main() -> None:
         st.error(str(e))
         st.stop()
 
-    sel_layer = st.selectbox("Select layer to display:", layers, index=0)
+    sel_layer = st.selectbox("Select fish run:", layers, index=0)
 
     # Load selected layer
     try:
@@ -211,7 +211,7 @@ def main() -> None:
         st.error("Neither 'S30_2040D_median' nor 'S32_2080D_median' found in this layer.")
         st.stop()
 
-    sel_field = st.selectbox("Select temperature field:", candidate_fields, index=0)
+    sel_field = st.selectbox("Select temperature field (2040 or 2080 Maximum Weekly Maximum Stream Temperature):", candidate_fields, index=0)
 
     # Threshold slider with degenerate-range guard
     try:
@@ -227,7 +227,7 @@ def main() -> None:
     else:
         step = max((vmax - vmin) / 100.0, 1e-6)
         threshold = st.slider(
-            f"Threshold for {sel_field} (polygons below render grey):",
+            f"Threshold for {sel_field}: BSR's colored in grey are below this temperature threshold",
             min_value=float(vmin),
             max_value=float(vmax),
             value=float(default_val),
