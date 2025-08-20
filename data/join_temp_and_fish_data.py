@@ -432,7 +432,7 @@ if __name__ == "__main__":
     fish_dist_gpkg = r"data\inputs\All_Fish_Dist.gpkg"
     fish_dist_path = r"data\outputs\All_Fish_Dist_with_temp.gpkg"
 
-    #join_temp_medians_to_fish(temp_points_gpkg, fish_dist_gpkg, fish_dist_path)
+    join_temp_medians_to_fish(temp_points_gpkg, fish_dist_gpkg, fish_dist_path)
 
     bsr_path = r"data\inputs\base_bsr.gpkg"
     fish_dist_path = r"data\outputs\All_Fish_Dist_with_temp.gpkg"
