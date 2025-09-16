@@ -1,6 +1,6 @@
 import math
 from pathlib import Path
-from typing import List, Tuple, Optional, Dict
+from typing import List, Dict
 
 import streamlit as st
 import geopandas as gpd
@@ -11,6 +11,19 @@ import fiona
 
 st.set_page_config(layout="wide")
 
+# -------------------------
+# Session init
+# -------------------------
+def _init_state() -> None:
+    """Initialize keys we rely on."""
+    for k, v in {
+        "gdf_scored": None,     # stores last computed GeoDataFrame
+        "last_weights": None,   # stores last weights used to compute
+        "last_layer_sig": None, # (gpkg_path, layer) tuple
+    }.items():
+        st.session_state.setdefault(k, v)
+
+_init_state()
 
 # -------------------------
 # Path utilities & validation
@@ -28,7 +41,6 @@ def resolve_gpkg_path(raw_path: str) -> Path:
         raise FileNotFoundError(f"Path is not a file: {p}")
     return p
 
-
 # -------------------------
 # Data loading
 # -------------------------
@@ -43,7 +55,6 @@ def list_layers(gpkg_path: str) -> List[str]:
     if not layers:
         raise ValueError(f"No layers found in GeoPackage: {p}")
     return layers
-
 
 @st.cache_data
 def load_layer(gpkg_path: str, layer: str) -> gpd.GeoDataFrame:
@@ -65,7 +76,6 @@ def load_layer(gpkg_path: str, layer: str) -> gpd.GeoDataFrame:
 
     return gdf_wgs84
 
-
 # -------------------------
 # UI helpers: linked slider + number box with sum constraint
 # -------------------------
@@ -78,12 +88,10 @@ def _init_weight_state(keys: List[str], default_each: int = 20) -> None:
         if n_key not in st.session_state:
             st.session_state[n_key] = default_each
 
-
 def _link_slider_to_box(key: str):
     """Callback: when slider moves, update its paired number input."""
     sk, nk = f"{key}_slider", f"{key}_num"
     st.session_state[nk] = st.session_state[sk]
-
 
 def _link_box_to_slider(key: str):
     """Callback: when number changes, update its paired slider and clamp to [0,100]."""
@@ -91,7 +99,6 @@ def _link_box_to_slider(key: str):
     val = max(0, min(100, int(st.session_state[nk])))
     st.session_state[nk] = val
     st.session_state[sk] = val
-
 
 def weight_inputs() -> Dict[str, int]:
     """
@@ -132,7 +139,6 @@ def weight_inputs() -> Dict[str, int]:
     total = sum(weights.values())
     remaining = 100 - total
 
-    # Status line with color
     if remaining == 0:
         st.success("Remaining points: 0 ✓ (ready to compute)")
     elif remaining > 0:
@@ -140,17 +146,18 @@ def weight_inputs() -> Dict[str, int]:
     else:
         st.error(f"Over budget by {-remaining} (reduce weights to proceed)")
 
-    # Simple guidance when over/under
     st.caption("Tip: You can type exact values in the small boxes under each slider.")
 
-    return weights
+    # If weights changed since last compute, notify (but keep showing the last map until recomputed)
+    if st.session_state.last_weights is not None and weights != st.session_state.last_weights:
+        st.warning("Weights changed. Click **Compute** to update the map.", icon="⚠️")
 
+    return weights
 
 # -------------------------
 # Scoring & tiering
 # -------------------------
 REQUIRED_FIELDS = ["Geomorphic", "PScore", "UScore", "CurrCond", "CurrTemp", "Basin_Name"]
-
 
 def compute_weighted_fields(gdf: gpd.GeoDataFrame, weights: Dict[str, int]) -> gpd.GeoDataFrame:
     """
@@ -167,7 +174,6 @@ def compute_weighted_fields(gdf: gpd.GeoDataFrame, weights: Dict[str, int]) -> g
     for f in ["Geomorphic", "PScore", "UScore", "CurrCond", "CurrTemp"]:
         gdf[f] = pd.to_numeric(gdf[f], errors="coerce").fillna(0.0).clip(lower=0.0)
 
-    # Compute Weighted_Score exactly as specified (weights are 0–100 and must sum to 100)
     ws = (
         weights["Geomorphic_weight"] * (gdf["Geomorphic"] / 25.0)
         + weights["PScore_Weight"] * (gdf["PScore"] / 25.0)
@@ -178,7 +184,6 @@ def compute_weighted_fields(gdf: gpd.GeoDataFrame, weights: Dict[str, int]) -> g
     gdf = gdf.copy()
     gdf["Weighted_Score"] = ws.astype(float).round(2).clip(lower=0.0, upper=100.0)
 
-    # Basin-specific tiering
     def tier_row(basin: str, score: float) -> int:
         b = str(basin).strip()
         s = float(score)
@@ -197,12 +202,10 @@ def compute_weighted_fields(gdf: gpd.GeoDataFrame, weights: Dict[str, int]) -> g
             else:
                 return 3
         else:
-            # If other basins occur, default to mid priority to avoid misleading extremes
             return 2
 
     gdf["Weighted_Tier"] = [tier_row(b, s) for b, s in zip(gdf["Basin_Name"], gdf["Weighted_Score"])]
     return gdf
-
 
 # -------------------------
 # Map rendering (Weighted_Tier)
@@ -213,7 +216,6 @@ def map_weighted_tier(gdf: gpd.GeoDataFrame) -> folium.Map:
       - 1 (highest priority) -> red, 2 -> orange, 3 -> green
       - Tooltip shows Basin, Weighted_Tier, Weighted_Score (2 d.p.)
     """
-    # Priority color scheme (1 highest → warm; 3 lowest → cool)
     tier_colors = {1: "#b10026", 2: "#fd8d3c", 3: "#31a354"}
 
     def style_fn(feature):
@@ -228,14 +230,13 @@ def map_weighted_tier(gdf: gpd.GeoDataFrame) -> folium.Map:
     fields = [f for f in ["Basin_Name", "Weighted_Tier", "Weighted_Score"] if f in gdf.columns]
     aliases = [f"{f}:" for f in fields]
 
-    gj = folium.GeoJson(
+    folium.GeoJson(
         gdf,
         name="Priority",
         style_function=style_fn,
         tooltip=folium.GeoJsonTooltip(fields=fields, aliases=aliases, sticky=True),
     ).add_to(m)
 
-    # Legend
     legend_html = """
     <div style="position: fixed; bottom: 50px; left: 10px; z-index: 9999;
                 background: white; padding: 8px 10px; border: 1px solid #bbb;
@@ -250,6 +251,19 @@ def map_weighted_tier(gdf: gpd.GeoDataFrame) -> folium.Map:
     folium.LayerControl().add_to(m)
     return m
 
+# -------------------------
+# Compute callback
+# -------------------------
+def _compute_and_store(gdf: gpd.GeoDataFrame, weights: Dict[str, int], layer_sig: tuple) -> None:
+    """Compute fields and store results in session_state."""
+    try:
+        gdf_scored = compute_weighted_fields(gdf, weights)
+    except Exception as e:
+        st.error(f"Failed to compute weighted fields: {e}")
+        return
+    st.session_state.gdf_scored = gdf_scored
+    st.session_state.last_weights = weights.copy()
+    st.session_state.last_layer_sig = layer_sig
 
 # -------------------------
 # Streamlit app
@@ -290,6 +304,12 @@ def main() -> None:
         st.error(str(e))
         st.stop()
 
+    # If layer changed since last compute, clear previous result to prevent mismatch
+    current_sig = (gpkg_path, sel_layer)
+    if st.session_state.last_layer_sig is not None and st.session_state.last_layer_sig != current_sig:
+        st.session_state.gdf_scored = None
+        st.session_state.last_weights = None
+
     # Check required fields present
     missing = [f for f in REQUIRED_FIELDS if f not in gdf.columns]
     if missing:
@@ -305,34 +325,33 @@ def main() -> None:
     total = sum(weights.values())
     ready = (total == 100)
 
-    # Compute button (disabled unless weights sum to 100)
     st.markdown("---")
-    compute_clicked = st.button(
+    st.button(
         "Compute Weighted Score & Map",
         type="primary",
         disabled=not ready,
-        help="Enabled when weights sum to exactly 100"
+        help="Enabled when weights sum to exactly 100",
+        on_click=_compute_and_store,
+        args=(gdf, weights, current_sig),
+        key="compute_btn",
     )
 
-    if compute_clicked and ready:
-        try:
-            gdf_scored = compute_weighted_fields(gdf, weights)
-        except Exception as e:
-            st.error(f"Failed to compute weighted fields: {e}")
-            st.stop()
-
-        m = map_weighted_tier(gdf_scored)
-        st_folium(m, use_container_width=True, height=720)
+    # Persistently display the last computed result (if any)
+    if st.session_state.gdf_scored is not None:
+        m = map_weighted_tier(st.session_state.gdf_scored)
+        # Give the Folium component a stable key so it doesn't remount unexpectedly
+        st_folium(m, use_container_width=True, height=720, key="priority_map")
 
         with st.expander("Preview of computed attributes (first 10 rows)"):
             st.dataframe(
-                gdf_scored[["Basin_Name", "Geomorphic", "PScore", "UScore", "CurrCond", "CurrTemp",
-                            "Weighted_Score", "Weighted_Tier"]].head(10)
+                st.session_state.gdf_scored[
+                    ["Basin_Name", "Geomorphic", "PScore", "UScore", "CurrCond", "CurrTemp",
+                     "Weighted_Score", "Weighted_Tier"]
+                ].head(10)
             )
         st.caption("Note: Fields are added in memory only; the GeoPackage is not modified.")
     else:
         st.info("Adjust weights so the total equals 100, then click **Compute**.")
-
 
 if __name__ == "__main__":
     main()
