@@ -149,7 +149,7 @@ def weight_inputs() -> Dict[str, int]:
 # -------------------------
 # Scoring & tiering
 # -------------------------
-REQUIRED_FIELDS = ["Geomorphic", "PScore", "UScore", "CurrCond", "CurrTemp", "Basin"]
+REQUIRED_FIELDS = ["Geomorphic", "PScore", "UScore", "CurrCond", "CurrTemp", "Basin_Name"]
 
 
 def compute_weighted_fields(gdf: gpd.GeoDataFrame, weights: Dict[str, int]) -> gpd.GeoDataFrame:
@@ -200,7 +200,7 @@ def compute_weighted_fields(gdf: gpd.GeoDataFrame, weights: Dict[str, int]) -> g
             # If other basins occur, default to mid priority to avoid misleading extremes
             return 2
 
-    gdf["Weighted_Tier"] = [tier_row(b, s) for b, s in zip(gdf["Basin"], gdf["Weighted_Score"])]
+    gdf["Weighted_Tier"] = [tier_row(b, s) for b, s in zip(gdf["Basin_Name"], gdf["Weighted_Score"])]
     return gdf
 
 
@@ -225,7 +225,7 @@ def map_weighted_tier(gdf: gpd.GeoDataFrame) -> folium.Map:
     x_min, y_min, x_max, y_max = gdf.total_bounds
     m.fit_bounds([[y_min, x_min], [y_max, x_max]])
 
-    fields = [f for f in ["Basin", "Weighted_Tier", "Weighted_Score"] if f in gdf.columns]
+    fields = [f for f in ["Basin_Name", "Weighted_Tier", "Weighted_Score"] if f in gdf.columns]
     aliases = [f"{f}:" for f in fields]
 
     gj = folium.GeoJson(
@@ -326,7 +326,7 @@ def main() -> None:
 
         with st.expander("Preview of computed attributes (first 10 rows)"):
             st.dataframe(
-                gdf_scored[["Basin", "Geomorphic", "PScore", "UScore", "CurrCond", "CurrTemp",
+                gdf_scored[["Basin_Name", "Geomorphic", "PScore", "UScore", "CurrCond", "CurrTemp",
                             "Weighted_Score", "Weighted_Tier"]].head(10)
             )
         st.caption("Note: Fields are added in memory only; the GeoPackage is not modified.")
