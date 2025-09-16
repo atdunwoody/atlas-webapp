@@ -1,28 +1,14 @@
 
 from __future__ import annotations
 from pathlib import Path
-from typing import List, Optional, Tuple, Dict
 import warnings
 
 import fiona
 import geopandas as gpd
 import pandas as pd
-
-from pathlib import Path
-from typing import Optional
 import re
 import numpy as np
-import fiona
-import geopandas as gpd
-import pandas as pd
-
-from pathlib import Path
-from typing import Optional, Sequence
-import fiona
-import geopandas as gpd
-import pandas as pd
-import numpy as np
-
+from pyproj import CRS
 
 def join_temp_medians_to_fish(
     temp_points_path: str,
@@ -159,9 +145,6 @@ def join_temp_medians_to_fish(
     return out_path.as_posix()
 
 
-
-
-
 def _sanitize_layer_name(name: str) -> str:
     """Make a safe GPKG layer name."""
     safe = "".join(ch if ch.isalnum() or ch in ("_", "-") else "_" for ch in name)
@@ -180,14 +163,6 @@ def _list_gpkg_layers(gpkg_path: str) -> List[str]:
     if not layers:
         raise ValueError(f"No layers found in {gpkg_path}")
     return layers
-
-
-from pathlib import Path
-from typing import Optional, Tuple, List, Dict
-import warnings
-
-import geopandas as gpd
-from pyproj import CRS
 
 # ---------- small helpers ----------
 def _list_gpkg_layers(path: str) -> List[str]:
