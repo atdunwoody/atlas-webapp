@@ -182,9 +182,9 @@ def process_geopackage(
 
 if __name__ == "__main__":
     # --- Example execution using your provided paths ---
-    IN_GPKG = r"data\outputs\base_bsr_with_temp.gpkg"
+    IN_GPKG = r"data\inputs\base_bsr.gpkg"
     CSV = r"data\inputs\BSR_RCAT.csv"
-    OUT = r"data\outputs\base_bsr_with_temp_scaled_joined.gpkg"
+    OUT = r"data\outputs\base_bsr_scaled_scores.gpkg"
 
     out_path = process_geopackage(IN_GPKG, CSV, OUT)
     print(f"Wrote: {out_path}")
