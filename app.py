@@ -1,15 +1,12 @@
 import math
 from pathlib import Path
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Dict
 
 import streamlit as st
 import geopandas as gpd
 import pandas as pd
 from streamlit_folium import st_folium
 import folium
-import matplotlib.cm as cm
-import matplotlib.colors as mcolors
-import branca.colormap as bcm
 import fiona
 
 st.set_page_config(layout="wide")
@@ -50,7 +47,7 @@ def list_layers(gpkg_path: str) -> List[str]:
 
 @st.cache_data
 def load_layer(gpkg_path: str, layer: str) -> gpd.GeoDataFrame:
-    """Read a layer and reproject to EPSG:4326 for web mapping."""
+    """Read a layer and reproject to EPSG:4326 for web mapping (preserve original in session)."""
     p = resolve_gpkg_path(gpkg_path)
     try:
         gdf = gpd.read_file(str(p), layer=layer)
@@ -60,108 +57,224 @@ def load_layer(gpkg_path: str, layer: str) -> gpd.GeoDataFrame:
     if gdf.empty:
         raise ValueError(f"Layer '{layer}' is empty in {p}.")
 
+    # Keep original CRS for writing; make a WGS84 copy for web map
     if gdf.crs is None:
-        st.warning("Input layer has no CRS. Assuming it is already in EPSG:4326 for display.")
+        st.warning("Input layer has no CRS. Assuming it is EPSG:4326 for display; writing preserves as-is.")
         gdf_wgs84 = gdf
     else:
         gdf_wgs84 = gdf.to_crs(epsg=4326)
 
-    missing = [f for f in ("S30_2040D_median", "S32_2080D_median") if f not in gdf.columns]
-    if missing:
-        st.warning(f"Missing expected fields in layer '{layer}': {', '.join(missing)}")
-
-    return gdf_wgs84
+    return gdf, gdf_wgs84
 
 
-def numeric_min_max(series: pd.Series) -> Tuple[float, float]:
-    """Return finite (min, max) from a numeric series ignoring NaNs/inf, else raise."""
-    s = pd.to_numeric(series, errors="coerce").replace([math.inf, -math.inf], pd.NA).dropna()
-    if s.empty:
-        raise ValueError("Selected field has no numeric values.")
-    return float(s.min()), float(s.max())
+def ensure_numeric(series: pd.Series, name: str) -> pd.Series:
+    s = pd.to_numeric(series, errors="coerce")
+    if s.isna().all():
+        raise ValueError(f"Field '{name}' has no numeric values.")
+    return s
 
 
 # -------------------------
-# Map rendering
+# UI helpers
 # -------------------------
-def create_map(
-    gdf: gpd.GeoDataFrame,
-    field: str,
-    threshold: Optional[float],
-    *,
-    hatch_on_missing: bool = True
-) -> folium.Map:
+def _pair_weight_control(label: str, key: str, default: int = 20) -> int:
     """
-    Folium choropleth with:
-      - Color by `field`
-      - Grey where value < threshold
-      - White/dashed where either median field is null
+    A slider (0–100) paired with a number input (box).
+    Bi-directional sync via st.session_state.
     """
-    vmin, vmax = numeric_min_max(gdf[field])
+    slider_key = f"{key}_slider"
+    input_key = f"{key}_input"
 
-    # Handle degenerate range for color normalization & legend
-    if math.isclose(vmin, vmax, rel_tol=0, abs_tol=1e-12):
-        pad = max(abs(vmin) * 0.01, 1e-6)  # small symmetric padding
-        vmin_c, vmax_c = vmin - pad, vmax + pad
+    # Initialize once
+    if slider_key not in st.session_state:
+        st.session_state[slider_key] = int(default)
+    if input_key not in st.session_state:
+        st.session_state[input_key] = int(default)
+
+    def sync_from_slider():
+        st.session_state[input_key] = int(st.session_state[slider_key])
+
+    def sync_from_input():
+        v = int(st.session_state[input_key])
+        v = max(0, min(100, v))
+        st.session_state[input_key] = v
+        st.session_state[slider_key] = v
+
+    c1, c2 = st.columns([3, 1])
+    with c1:
+        st.slider(
+            label, min_value=0, max_value=100, step=1,
+            key=slider_key, on_change=sync_from_slider
+        )
+    with c2:
+        st.number_input(" ", min_value=0, max_value=100, step=1,
+                        key=input_key, on_change=sync_from_input, label_visibility="hidden")
+    return int(st.session_state[input_key])
+
+
+def weights_section() -> Dict[str, int]:
+    st.subheader("Component Weights (must sum to 100)")
+    cA, cB, cC = st.columns(3)
+    with cA:
+        geom_w = _pair_weight_control("Geomorphic weight", "geom_w", 20)
+        p_w    = _pair_weight_control("PScore weight", "p_w", 20)
+    with cB:
+        u_w    = _pair_weight_control("UScore weight", "u_w", 20)
+        cc_w   = _pair_weight_control("CurrCond weight", "cc_w", 20)
+    with cC:
+        ct_w   = _pair_weight_control("CurrTemp weight", "ct_w", 20)
+
+    total = geom_w + p_w + u_w + cc_w + ct_w
+    remaining = 100 - total
+
+    # Visual status
+    if remaining == 0:
+        st.success("Remaining points: 0 (weights valid)")
+    elif remaining > 0:
+        st.info(f"Remaining points: {remaining} (allocate these)")
     else:
-        vmin_c, vmax_c = vmin, vmax
+        # Color cue when over budget
+        st.markdown(
+            f"<div style='padding:8px;border:1px solid #cc0000;background:#ffe6e6;color:#cc0000;'>"
+            f"Remaining points: {remaining} (over by {-remaining}). Adjust weights so they sum to 100."
+            f"</div>",
+            unsafe_allow_html=True,
+        )
 
-    cmap = cm.viridis
-    norm = mcolors.Normalize(vmin=vmin_c, vmax=vmax_c)
+    return {
+        "Geomorphic_weight": geom_w,
+        "PScore_Weight": p_w,
+        "UScore_Weight": u_w,
+        "CurrCond_Weight": cc_w,
+        "CurrTemp_Weight": ct_w,
+        "remaining": remaining,
+    }
+
+
+# -------------------------
+# Scoring logic
+# -------------------------
+REQUIRED_FIELDS = ["Geomorphic", "PScore", "UScore", "CurrCond", "CurrTemp", "Basin"]
+
+def compute_scores(gdf: gpd.GeoDataFrame, weights: Dict[str, int]) -> gpd.GeoDataFrame:
+    """
+    Compute Weighted_Score and Weighted_Tier.
+    Weighted_Score = sum( weight * (component/25) ), where weight in [0..100] and sum(weights)=100.
+    Tier rules depend on Basin.
+    """
+    # Validate required fields
+    missing = [f for f in REQUIRED_FIELDS if f not in gdf.columns]
+    if missing:
+        raise ValueError(f"Missing required fields in layer: {', '.join(missing)}")
+
+    # Coerce numeric fields
+    geom = ensure_numeric(gdf["Geomorphic"], "Geomorphic")
+    ps   = ensure_numeric(gdf["PScore"], "PScore")
+    us   = ensure_numeric(gdf["UScore"], "UScore")
+    cc   = ensure_numeric(gdf["CurrCond"], "CurrCond")
+    ct   = ensure_numeric(gdf["CurrTemp"], "CurrTemp")
+
+    # Extract weights
+    gw = float(weights["Geomorphic_weight"])
+    pw = float(weights["PScore_Weight"])
+    uw = float(weights["UScore_Weight"])
+    cw = float(weights["CurrCond_Weight"])
+    tw = float(weights["CurrTemp_Weight"])
+
+    # Weighted score (0–100) assuming component scores are 0–25
+    weighted_score = (gw * (geom / 25.0) +
+                      pw * (ps   / 25.0) +
+                      uw * (us   / 25.0) +
+                      cw * (cc   / 25.0) +
+                      tw * (ct   / 25.0))
+
+    out = gdf.copy()
+    out["Weighted_Score"] = weighted_score.astype("float64")
+
+    # Tier mapping by Basin
+    def tier_for_row(basin: str, score: float) -> Optional[int]:
+        if pd.isna(score) or basin is None:
+            return None
+        b = str(basin).strip()
+        if b == "Upper Grande Ronde":
+            # 1: <65, 2: 65–85, 3: >85 (interpretation: 65 < x < 85 is Tier 2; tie-breaks go to higher tier)
+            if score < 65:
+                return 1
+            elif score > 85:
+                return 3
+            else:
+                return 2
+        elif b == "Catherine Creek":
+            if score < 50:
+                return 1
+            elif score > 75:
+                return 3
+            else:
+                return 2
+        else:
+            return None  # Unmapped basin -> no tier
+
+    out["Weighted_Tier"] = [
+        tier_for_row(basin, sc) for basin, sc in zip(out["Basin"], out["Weighted_Score"])
+    ]
+    # Use Int64 (nullable) for nicer writes
+    out["Weighted_Tier"] = pd.Series(out["Weighted_Tier"], dtype="Int64")
+    return out
+
+
+# -------------------------
+# Map rendering by Weighted_Tier
+# -------------------------
+def create_tier_map(gdf_wgs84: gpd.GeoDataFrame) -> folium.Map:
+    """
+    Category map for Weighted_Tier with 3 colors (1=highest priority).
+    Tooltip shows Weighted_Score.
+    """
+    # Color map: 1 (high) -> strong red, 2 -> orange, 3 -> pale yellow
+    tier_colors = {1: "#d7191c", 2: "#fdae61", 3: "#ffffbf"}
+    default_fill = "#dddddd"
 
     def style_function(feature):
         props = feature["properties"]
-        v = props.get(field, None)
-
-        def to_float(x):
-            try:
-                return float(x)
-            except Exception:
-                return float("nan")
-
-        s30_num = to_float(props.get("S30_2040D_median", None))
-        s32_num = to_float(props.get("S32_2080D_median", None))
-        is_missing_temp = hatch_on_missing and (math.isnan(s30_num) or math.isnan(s32_num))
-
-        if is_missing_temp:
-            return {"fillColor": "#ffffff", "color": "#000000", "weight": 1.0, "dashArray": "4 4", "fillOpacity": 0.05}
-
-        v_num = to_float(v)
-        if (threshold is not None) and not math.isnan(v_num) and (v_num < threshold):
-            return {"fillColor": "#bdbdbd", "color": "#666666", "weight": 0.5, "fillOpacity": 0.8}
-
-        if math.isnan(v_num):
-            return {"fillColor": "#eeeeee", "color": "#999999", "weight": 0.5, "fillOpacity": 0.6}
-
-        color = mcolors.rgb2hex(cmap(norm(v_num)))
-        return {"fillColor": color, "color": "#000000", "weight": 0.5, "fillOpacity": 0.8}
+        tier = props.get("Weighted_Tier", None)
+        color = tier_colors.get(tier, default_fill)
+        return {"fillColor": color, "color": "#333333", "weight": 0.6, "fillOpacity": 0.8}
 
     m = folium.Map(tiles="CartoDB positron", control_scale=True)
-    x_min, y_min, x_max, y_max = gdf.total_bounds
+    x_min, y_min, x_max, y_max = gdf_wgs84.total_bounds
     m.fit_bounds([[y_min, x_min], [y_max, x_max]])
 
+    # Tooltip content
+    tooltip_fields = []
+    tooltip_aliases = []
+
+    if "Weighted_Tier" in gdf_wgs84.columns:
+        tooltip_fields.append("Weighted_Tier")
+        tooltip_aliases.append("Weighted Tier:")
+    if "Weighted_Score" in gdf_wgs84.columns:
+        tooltip_fields.append("Weighted_Score")
+        tooltip_aliases.append("Weighted Score:")
+
+    if "Basin" in gdf_wgs84.columns:
+        tooltip_fields.append("Basin")
+        tooltip_aliases.append("Basin:")
+
     gj = folium.GeoJson(
-        gdf,
-        name="Polygons",
+        gdf_wgs84,
+        name="Weighted Priority",
         style_function=style_function,
-        tooltip=folium.GeoJsonTooltip(
-            fields=[fld for fld in [field, "S30_2040D_median", "S32_2080D_median"] if fld in gdf.columns],
-            aliases=[f"{field}:", "S30_2040D_median:", "S32_2080D_median:"][:sum([fld in gdf.columns for fld in [field, 'S30_2040D_median', 'S32_2080D_median']])],
-            sticky=True,
-        ),
+        tooltip=folium.GeoJsonTooltip(fields=tooltip_fields, aliases=tooltip_aliases, sticky=True),
     )
     gj.add_to(m)
 
-    bcm.LinearColormap(
-        colors=[mcolors.rgb2hex(cmap(x)) for x in [0.0, 0.25, 0.5, 0.75, 1.0]],
-        vmin=vmin_c, vmax=vmax_c, caption=field
-    ).add_to(m)
-
+    # Legend
     legend_html = """
     <div style="position: fixed; bottom: 50px; left: 10px; z-index: 9999; background: white; padding: 8px 10px; border: 1px solid #bbb; border-radius: 4px; font-size: 12px;">
-      <div style="margin-bottom:4px;"><b>Symbology</b></div>
-      <div><span style="display:inline-block;width:14px;height:14px;border:1px dashed #000;background:#fff;opacity:0.6;margin-right:6px;"></span> Fish run not present in BSR </div>
-      <div><span style="display:inline-block;width:14px;height:14px;background:#bdbdbd;border:1px solid #666;margin-right:6px;"></span> Below temperature threshold</div>
+      <div style="margin-bottom:6px;"><b>Weighted Tier (1 = highest priority)</b></div>
+      <div><span style="display:inline-block;width:14px;height:14px;background:#d7191c;border:1px solid #444;margin-right:6px;"></span> 1</div>
+      <div><span style="display:inline-block;width:14px;height:14px;background:#fdae61;border:1px solid #444;margin-right:6px;"></span> 2</div>
+      <div><span style="display:inline-block;width:14px;height:14px;background:#ffffbf;border:1px solid #444;margin-right:6px;"></span> 3</div>
+      <div style="margin-top:6px;color:#666;">Hover to see Weighted Score</div>
     </div>
     """
     m.get_root().html.add_child(folium.Element(legend_html))
@@ -173,15 +286,18 @@ def create_map(
 # Streamlit UI
 # -------------------------
 def main() -> None:
-    st.title("BSR Analysis Map Viewer")
+    st.title("Weighted Restoration Prioritization")
 
     uploaded = st.file_uploader("Upload a GeoPackage (optional)", type=["gpkg"])
-    gpkg_default = "data/outputs/base_bsr_with_temp.gpkg"
-    gpkg_input = st.text_input("GeoPackage path", value=gpkg_default,
-                               help="If not uploading, provide a path relative to app root.")
+    gpkg_default = "data/outputs/base_bsr_with_temp_scaled_joined.gpkg"
+    gpkg_input = st.text_input(
+        "GeoPackage path",
+        value=gpkg_default,
+        help="If not uploading, provide a path relative to app root."
+    )
 
     if uploaded is not None:
-        tmp_path = Path("/tmp") / uploaded.name
+        tmp_path = Path(st.secrets.get("TMP_DIR", "/tmp")) / uploaded.name  # falls back to /tmp
         with open(tmp_path, "wb") as f:
             f.write(uploaded.read())
         gpkg_path = str(tmp_path)
@@ -196,47 +312,97 @@ def main() -> None:
         st.error(str(e))
         st.stop()
 
-    sel_layer = st.selectbox("Select fish run:", layers, index=0)
+    sel_layer = st.selectbox("Select layer:", layers, index=0)
 
     # Load selected layer
     try:
-        gdf = load_layer(gpkg_path, sel_layer)
+        gdf_src, gdf_wgs84 = load_layer(gpkg_path, sel_layer)
     except Exception as e:
         st.error(str(e))
         st.stop()
 
-    # Field selection
-    candidate_fields = [f for f in ["S30_2040D_median", "S32_2080D_median"] if f in gdf.columns]
-    if not candidate_fields:
-        st.error("Neither 'S30_2040D_median' nor 'S32_2080D_median' found in this layer.")
-        st.stop()
+    # Weights
+    weights = weights_section()
+    remaining = weights.pop("remaining")
 
-    sel_field = st.selectbox("Select temperature field (2040 or 2080 Maximum Weekly Maximum Stream Temperature):", candidate_fields, index=0)
-
-    # Threshold slider with degenerate-range guard
-    try:
-        vmin, vmax = numeric_min_max(gdf[sel_field])
-        default_val = float(pd.to_numeric(gdf[sel_field], errors="coerce").dropna().median())
-    except Exception as e:
-        st.error(f"Cannot compute slider bounds for '{sel_field}': {e}")
-        st.stop()
-
-    if math.isclose(vmin, vmax, rel_tol=0, abs_tol=1e-12):
-        st.info(f"All '{sel_field}' values are identical ({vmin:.3f}). Threshold slider disabled.")
-        threshold = float(vmin)
-    else:
-        step = max((vmax - vmin) / 100.0, 1e-6)
-        threshold = st.slider(
-            f"Threshold for {sel_field}: BSR's colored in grey are below this temperature threshold",
-            min_value=float(vmin),
-            max_value=float(vmax),
-            value=float(default_val),
-            step=step,
+    # Output GPKG target
+    st.subheader("Output")
+    out_col1, out_col2 = st.columns([2, 1])
+    with out_col1:
+        out_gpkg = st.text_input(
+            "Output GeoPackage path",
+            value=str(Path(gpkg_path).with_name(Path(gpkg_path).stem + "_weighted.gpkg")),
+            help="Will create or update this GeoPackage."
+        )
+    with out_col2:
+        out_layer = st.text_input(
+            "Output layer name",
+            value=sel_layer,
+            help="Layer to write (overwrites if it already exists)."
         )
 
-    # Render map
-    m = create_map(gdf, sel_field, threshold)
-    st_folium(m, use_container_width=True, height=700)
+    # Compute & save
+    disabled_reason = None
+    if remaining != 0:
+        disabled_reason = "Weights must sum to 100."
+    else:
+        # Check required fields existence before enabling
+        missing = [f for f in REQUIRED_FIELDS if f not in gdf_src.columns]
+        if missing:
+            disabled_reason = f"Missing fields: {', '.join(missing)}"
+
+    compute_btn = st.button(
+        "Compute Weighted_Score & Weighted_Tier and Save",
+        type="primary",
+        disabled=disabled_reason is not None,
+        help=disabled_reason or "Writes fields to output GeoPackage/layer."
+    )
+
+    if compute_btn:
+        try:
+            # Compute on source CRS dataframe for writing
+            gdf_scored = compute_scores(gdf_src, weights)
+
+            # Write to output GPKG
+            out_path = Path(out_gpkg).expanduser()
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+
+            # Remove existing layer if present (overwrite semantics)
+            mode = "w"
+            if out_path.exists():
+                # If the container exists and has the layer, we will overwrite by writing to new file
+                # using driver='GPKG' with mode='w' only if creating fresh; otherwise, we need to drop layer.
+                # Simplest: if file exists and we want to overwrite the layer, we can write to a temp then replace.
+                # For clarity here, we remove the whole file when writing a new single layer.
+                out_path.unlink(missing_ok=True)
+            gdf_scored.to_file(out_path, layer=out_layer, driver="GPKG")
+
+            st.success(f"Wrote fields to {out_path} (layer '{out_layer}').")
+
+            # For map display: use WGS84 version with the new fields merged for visualization
+            gdf_wgs84_disp = gdf_wgs84.copy()
+            gdf_wgs84_disp = gdf_wgs84_disp.drop(columns=[c for c in ["Weighted_Score", "Weighted_Tier"] if c in gdf_wgs84_disp.columns], errors="ignore")
+            gdf_wgs84_disp = gdf_wgs84_disp.merge(
+                gdf_scored[["Weighted_Score", "Weighted_Tier", gdf_scored.index.name or "index"]].reset_index(),
+                on=(gdf_scored.index.name or "index"),
+                how="left"
+            )
+
+            m = create_tier_map(gdf_wgs84_disp)
+            st_folium(m, use_container_width=True, height=700)
+
+        except Exception as e:
+            st.error(f"Failed to compute/write: {e}")
+            st.stop()
+    else:
+        # If not computed yet (or invalid weights), show guidance and a preview-only map (if fields already exist)
+        has_existing = all(c in gdf_wgs84.columns for c in ["Weighted_Score", "Weighted_Tier"])
+        if has_existing and remaining == 0:
+            st.caption("Displaying current Weighted_Tier from the layer (no recompute this run).")
+            m = create_tier_map(gdf_wgs84)
+            st_folium(m, use_container_width=True, height=700)
+        else:
+            st.info("Adjust weights so they sum to 100, then click Compute to create fields and map the tiers.")
 
 
 if __name__ == "__main__":
