@@ -20,7 +20,7 @@ def _init_state() -> None:
     for k, v in {
         "gdf_scored": None,     # stores last computed GeoDataFrame
         "last_weights": None,   # stores last weights used to compute
-        "last_layer_sig": None, # (gpkg_path, single_layer_name, currcond_field) tuple
+        "last_layer_sig": None, # (gpkg_path, single_layer_name, field choices) tuple
     }.items():
         st.session_state.setdefault(k, v)
 
@@ -87,30 +87,6 @@ def load_single_layer(gpkg_path: str) -> gpd.GeoDataFrame:
     return gdf_wgs84
 
 # -------------------------
-# UI helpers: linked slider + number box with sum constraint
-# -------------------------
-def _init_weight_state(keys: List[str], default_each: int = 20) -> None:
-    """Initialize session_state for weight sliders and numeric boxes."""
-    for k in keys:
-        s_key, n_key = f"{k}_slider", f"{k}_num"
-        if s_key not in st.session_state:
-            st.session_state[s_key] = default_each
-        if n_key not in st.session_state:
-            st.session_state[n_key] = default_each
-
-def _link_slider_to_box(key: str):
-    """Callback: when slider moves, update its paired number input."""
-    sk, nk = f"{key}_slider", f"{key}_num"
-    st.session_state[nk] = st.session_state[sk]
-
-def _link_box_to_slider(key: str):
-    """Callback: when number changes, update its paired slider and clamp to [0,100]."""
-    sk, nk = f"{key}_slider", f"{key}_num"
-    val = max(0, min(100, int(st.session_state[nk])))
-    st.session_state[nk] = val
-    st.session_state[sk] = val
-
-# -------------------------
 # UI helpers: linked slider + number box with sum constraint (namespaced)
 # -------------------------
 def _ns_key(ns: str, key: str, kind: str) -> str:
@@ -136,26 +112,25 @@ def _link_box_to_slider(ns: str, key: str) -> None:
     st.session_state[nk] = val
     st.session_state[sk] = val
 
-def weight_inputs(currcond_label: str, ns: str) -> Tuple[Dict[str, int], int]:
+def weight_inputs(currcond_label: str, currtemp_label: str, mig_label: str, ns: str) -> Tuple[Dict[str, int], int]:
     """
-    Render 5 weight controls (slider + numeric input) under namespace `ns` and
+    Render 6 weight controls (slider + numeric input) under namespace `ns` and
     return (weights dict, total). Sliders 0–100; total must sum to 100 to enable Compute.
-    The namespace ties the widgets to the selected Current-Condition field so
-    each option can have its own weight set and sum check.
     """
     labels = [
         ("Geomorphic_weight", "Geomorphic"),
         ("PScore_Weight", "PScore"),
         ("UScore_Weight", "UScore"),
         ("CurrCond_Weight", currcond_label),
-        ("CurrTemp_Weight", "CurrTemp"),
+        ("CurrTemp_Weight", currtemp_label),
+        ("Migration_Weight", mig_label),
     ]
     base_keys = [k for k, _ in labels]
     _init_weight_state_ns(ns, base_keys)
 
     st.markdown("### Weights (must sum to **100**)")
 
-    cols = st.columns(5)
+    cols = st.columns(6)
     for (key, label), col in zip(labels, cols):
         with col:
             st.slider(
@@ -196,12 +171,15 @@ def weight_inputs(currcond_label: str, ns: str) -> Tuple[Dict[str, int], int]:
 # -------------------------
 # Scoring & tiering
 # -------------------------
-BASE_REQUIRED_FIELDS = ["Geomorphic", "PScore", "UScore", "CurrTemp", "Basin_Name"]
+# Keep only the always-required fields here; dynamic fields are validated later.
+BASE_REQUIRED_FIELDS = ["Geomorphic", "PScore", "UScore", "Basin_Name"]
 
 def compute_weighted_fields(
     gdf: gpd.GeoDataFrame,
     weights: Dict[str, int],
-    currcond_field: str
+    currcond_field: str,
+    currtemp_field: str,
+    migration_field: str,
 ) -> gpd.GeoDataFrame:
     """
     Add in-memory fields:
@@ -213,13 +191,13 @@ def compute_weighted_fields(
       Catherine Creek:    score ≤50 → 3; (50,75) → 2; score ≥75 → 1
     """
     # Validate fields
-    required = BASE_REQUIRED_FIELDS + [currcond_field]
+    required = BASE_REQUIRED_FIELDS + [currcond_field, currtemp_field, migration_field]
     missing = [f for f in required if f not in gdf.columns]
     if missing:
         raise ValueError(f"Missing required fields: {', '.join(missing)}")
 
     # Defensive: coerce numeric score fields; non-numeric -> NaN -> 0
-    num_fields = ["Geomorphic", "PScore", "UScore", currcond_field, "CurrTemp"]
+    num_fields = ["Geomorphic", "PScore", "UScore", currcond_field, currtemp_field, migration_field]
     gdf = gdf.copy()
     for f in num_fields:
         gdf[f] = pd.to_numeric(gdf[f], errors="coerce").fillna(0.0).clip(lower=0.0)
@@ -229,7 +207,8 @@ def compute_weighted_fields(
         + weights["PScore_Weight"] * (gdf["PScore"] / 25.0)
         + weights["UScore_Weight"] * (gdf["UScore"] / 25.0)
         + weights["CurrCond_Weight"] * (gdf[currcond_field] / 25.0)
-        + weights["CurrTemp_Weight"] * (gdf["CurrTemp"] / 25.0)
+        + weights["CurrTemp_Weight"] * (gdf[currtemp_field] / 25.0)
+        + weights["Migration_Weight"] * (gdf[migration_field] / 25.0)
     )
     gdf["Weighted_Score"] = ws.astype(float).round(2).clip(lower=0.0, upper=100.0)
 
@@ -357,12 +336,14 @@ def _score_map(
 def _compute_and_store(
     gdf: gpd.GeoDataFrame,
     weights: Dict[str, int],
-    layer_sig: Tuple[str, str, str],
-    currcond_field: str
+    layer_sig: Tuple[str, str, str, str, str],
+    currcond_field: str,
+    currtemp_field: str,
+    migration_field: str,
 ) -> None:
     """Compute fields and store results in session_state."""
     try:
-        gdf_scored = compute_weighted_fields(gdf, weights, currcond_field)
+        gdf_scored = compute_weighted_fields(gdf, weights, currcond_field, currtemp_field, migration_field)
     except Exception as e:
         st.error(f"Failed to compute weighted fields: {e}")
         return
@@ -402,7 +383,9 @@ def main() -> None:
         st.error(str(e))
         st.stop()
 
-    # Current Condition field selector
+    # -------------------------
+    # Current Condition selector
+    # -------------------------
     st.markdown("### Current Condition Field")
     currcond_options = {
         'Existing Current Condition': 'CurrCond',
@@ -417,8 +400,42 @@ def main() -> None:
     )
     currcond_field = currcond_options[currcond_label]
 
+    # -------------------------
+    # CurrTemp selector (NEW)
+    # -------------------------
+    st.markdown("### Temperature Score")
+    currtemp_options = {
+        "Existing CurrTemp": "CurrTemp",
+        "CurrTemp 18C threshold": "CurrTemp18C",
+        "CurrTemp 22C threshold": "CurrTemp22C",
+    }
+    currtemp_label = st.selectbox(
+        "Choose the temperature metric:",
+        list(currtemp_options.keys()),
+        index=0,
+        help="Select which temperature score to include in the weighting."
+    )
+    currtemp_field = currtemp_options[currtemp_label]
+
+    # -------------------------
+    # Migration Corridor selector (NEW)
+    # -------------------------
+    st.markdown("### Migration Corridor Score")
+    migration_options = {
+        "MScore_CH": "MScore_CH",
+        "MScore_ST": "MScore_ST",
+    }
+    migration_label = st.selectbox(
+        "Choose the migration corridor metric:",
+        list(migration_options.keys()),
+        index=0,
+        help="Pick which migration corridor score to include in the weighting."
+    )
+    migration_field = migration_options[migration_label]
+
     # Validate required columns before showing weights
-    missing_now = [f for f in (BASE_REQUIRED_FIELDS + [currcond_field]) if f not in gdf.columns]
+    dynamic_required = [currcond_field, currtemp_field, migration_field]
+    missing_now = [f for f in (BASE_REQUIRED_FIELDS + dynamic_required) if f not in gdf.columns]
     if missing_now:
         st.error(
             "The layer is missing required fields:\n\n"
@@ -428,13 +445,19 @@ def main() -> None:
         st.stop()
 
     # If inputs changed since last compute, clear previous result to prevent mismatch
-    current_sig = (gpkg_path, single_layer_name, currcond_field)
+    current_sig = (gpkg_path, single_layer_name, currcond_field, currtemp_field, migration_field)
     if st.session_state.last_layer_sig is not None and st.session_state.last_layer_sig != current_sig:
         st.session_state.gdf_scored = None
         st.session_state.last_weights = None
 
-    # Weights UI
-    weights, total = weight_inputs(currcond_label=currcond_label, ns=currcond_field)
+    # Weights UI (6 components)
+    ns = f"{currcond_field}__{currtemp_field}__{migration_field}"
+    weights, total = weight_inputs(
+        currcond_label=currcond_label,
+        currtemp_label=currtemp_label,
+        mig_label="Migration Corridor",
+        ns=ns,
+    )
     ready = (total == 100)
 
     st.markdown("---")
@@ -444,7 +467,7 @@ def main() -> None:
         disabled=not ready,
         help="Enabled when **this** selection's weights sum to exactly 100",
         on_click=_compute_and_store,
-        args=(gdf, weights, current_sig, currcond_field),
+        args=(gdf, weights, current_sig, currcond_field, currtemp_field, migration_field),
         key="compute_btn",
     )
 
@@ -474,7 +497,8 @@ def main() -> None:
 
         preview_cols = [
             "Basin_Name", "Geomorphic", "PScore", "UScore",
-            currcond_field, "CurrTemp", "Weighted_Score", "Weighted_Tier"
+            currcond_field, currtemp_field, migration_field,
+            "Weighted_Score", "Weighted_Tier"
         ]
         preview_cols = [c for c in preview_cols if c in st.session_state.gdf_scored.columns]
 
