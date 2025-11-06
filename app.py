@@ -93,9 +93,9 @@ def _ns_key(ns: str, key: str, kind: str) -> str:
     """Compose a session_state key for a widget under a namespace."""
     return f"{ns}__{key}_{kind}"
 
-def _init_weight_state_ns(ns: str, keys: List[str], default_each: int = 20) -> None:
+def _init_weight_state_ns(ns: str, defaults: Dict[str, int]) -> None:
     """Initialize session_state for weight sliders and numeric boxes under a namespace."""
-    for k in keys:
+    for k, default_each in defaults.items():
         s_key, n_key = _ns_key(ns, k, "slider"), _ns_key(ns, k, "num")
         st.session_state.setdefault(s_key, default_each)
         st.session_state.setdefault(n_key, default_each)
@@ -113,10 +113,6 @@ def _link_box_to_slider(ns: str, key: str) -> None:
     st.session_state[sk] = val
 
 def weight_inputs(currcond_label: str, currtemp_label: str, mig_label: str, ns: str) -> Tuple[Dict[str, int], int]:
-    """
-    Render 6 weight controls (slider + numeric input) under namespace `ns` and
-    return (weights dict, total). Sliders 0–100; total must sum to 100 to enable Compute.
-    """
     labels = [
         ("Geomorphic_weight", "Geomorphic"),
         ("PScore_Weight", "PScore"),
@@ -126,7 +122,17 @@ def weight_inputs(currcond_label: str, currtemp_label: str, mig_label: str, ns: 
         ("Migration_Weight", mig_label),
     ]
     base_keys = [k for k, _ in labels]
-    _init_weight_state_ns(ns, base_keys)
+
+    # --- per-key defaults: 17 for 4 categories; 16 for 2 (CurrTemp & Migration)
+    default_map = {
+        "Geomorphic_weight": 17,
+        "PScore_Weight": 17,
+        "UScore_Weight": 17,
+        "CurrCond_Weight": 17,
+        "CurrTemp_Weight": 16,
+        "Migration_Weight": 16,
+    }
+    _init_weight_state_ns(ns, default_map)
 
     st.markdown("### Weights (must sum to **100**)")
 
@@ -169,10 +175,18 @@ def weight_inputs(currcond_label: str, currtemp_label: str, mig_label: str, ns: 
     return weights, total
 
 # -------------------------
-# Scoring & tiering
+# Scoring & tiering (fixed)
 # -------------------------
-# Keep only the always-required fields here; dynamic fields are validated later.
 BASE_REQUIRED_FIELDS = ["Geomorphic", "PScore", "UScore", "Basin_Name"]
+
+def _minmax_norm(s: pd.Series) -> pd.Series:
+    s = pd.to_numeric(s, errors="coerce").fillna(0.0)
+    mn = float(s.min())
+    mx = float(s.max())
+    if mx > mn:
+        return (s - mn) / (mx - mn)
+    # constant column -> all zeros
+    return pd.Series(0.0, index=s.index, dtype="float64")
 
 def compute_weighted_fields(
     gdf: gpd.GeoDataFrame,
@@ -182,63 +196,56 @@ def compute_weighted_fields(
     migration_field: str,
 ) -> gpd.GeoDataFrame:
     """
-    Add in-memory fields:
-      - Weighted_Score = sum(Weight_i * Score_i/25)  (scores are 0–25 per component)
-      - Weighted_Tier based on Basin-specific thresholds
-
-    Tier edges:
-      Upper Grande Ronde: score ≤65 → 3; (65,85) → 2; score ≥85 → 1
-      Catherine Creek:    score ≤50 → 3; (50,75) → 2; score ≥75 → 1
+    Normalize each metric to [0,1] using min–max, then compute a 0–100 score:
+        Weighted_Score = sum_i ( weight_i * norm_i )
+    where the UI enforces sum(weights) == 100.
     """
-    # Validate fields
+    # Validate columns
     required = BASE_REQUIRED_FIELDS + [currcond_field, currtemp_field, migration_field]
-    missing = [f for f in required if f not in gdf.columns]
+    missing = [c for c in required if c not in gdf.columns]
     if missing:
         raise ValueError(f"Missing required fields: {', '.join(missing)}")
 
-    # Defensive: coerce numeric score fields; non-numeric -> NaN -> 0
-    num_fields = ["Geomorphic", "PScore", "UScore", currcond_field, currtemp_field, migration_field]
     gdf = gdf.copy()
-    for f in num_fields:
-        gdf[f] = pd.to_numeric(gdf[f], errors="coerce").fillna(0.0).clip(lower=0.0)
 
-    ws = (
-        weights["Geomorphic_weight"] * (gdf["Geomorphic"] / 25.0)
-        + weights["PScore_Weight"] * (gdf["PScore"] / 25.0)
-        + weights["UScore_Weight"] * (gdf["UScore"] / 25.0)
-        + weights["CurrCond_Weight"] * (gdf[currcond_field] / 25.0)
-        + weights["CurrTemp_Weight"] * (gdf[currtemp_field] / 25.0)
-        + weights["Migration_Weight"] * (gdf[migration_field] / 25.0)
-    )
-    gdf["Weighted_Score"] = ws.astype(float).round(2).clip(lower=0.0, upper=100.0)
+    # Map each weight key to the corresponding data column
+    field_map = {
+        "Geomorphic_weight": "Geomorphic",
+        "PScore_Weight": "PScore",
+        "UScore_Weight": "UScore",
+        "CurrCond_Weight": currcond_field,
+        "CurrTemp_Weight": currtemp_field,
+        "Migration_Weight": migration_field,
+    }
 
+    # Build normalized columns (0–1)
+    norm_cols = {}
+    for w_key, col in field_map.items():
+        ncol = f"{col}_norm"
+        gdf[ncol] = _minmax_norm(gdf[col])
+        norm_cols[w_key] = ncol
+
+    # Weighted sum (weights sum to 100 → score in [0,100])
+    ws = 0.0
+    for w_key, ncol in norm_cols.items():
+        w = float(weights.get(w_key, 0))
+        ws = ws + w * gdf[ncol]
+
+    gdf["Weighted_Score"] = ws.astype(float).clip(lower=0.0, upper=100.0).round(2)
+
+    # Tier logic (unchanged)
     def tier_row(basin: str, score: float) -> int:
         b = str(basin).strip()
         s = float(score)
         if b == "Upper Grande Ronde":
-            if s <= 65:
-                return 3
-            elif s < 85:
-                return 2
-            else:
-                return 1
+            return 3 if s <= 65 else (2 if s < 85 else 1)
         elif b == "Catherine Creek":
-            if s <= 50:
-                return 3
-            elif s < 75:
-                return 2
-            else:
-                return 1
+            return 3 if s <= 50 else (2 if s < 75 else 1)
         else:
-            # Default: mirror UGR thresholds
-            if s <= 65:
-                return 3
-            elif s < 85:
-                return 2
-            else:
-                return 1
+            return 3 if s <= 65 else (2 if s < 85 else 1)
 
     gdf["Weighted_Tier"] = [tier_row(b, s) for b, s in zip(gdf["Basin_Name"], gdf["Weighted_Score"])]
+
     return gdf
 
 # -------------------------
@@ -418,12 +425,13 @@ def main() -> None:
     currtemp_field = currtemp_options[currtemp_label]
 
     # -------------------------
-    # Migration Corridor selector (NEW)
+    # Migration Corridor selector 
     # -------------------------
+
     st.markdown("### Migration Corridor Score")
     migration_options = {
-        "MScore_CH": "MScore_CH",
-        "MScore_ST": "MScore_ST",
+        "Migration Corridor Score - Chinook": "MScore_CH",
+        "Migration Corridor Score - Steelhead": "MScore_ST",
     }
     migration_label = st.selectbox(
         "Choose the migration corridor metric:",
@@ -432,6 +440,7 @@ def main() -> None:
         help="Pick which migration corridor score to include in the weighting."
     )
     migration_field = migration_options[migration_label]
+
 
     # Validate required columns before showing weights
     dynamic_required = [currcond_field, currtemp_field, migration_field]
