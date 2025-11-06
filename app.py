@@ -409,7 +409,6 @@ def render_docs() -> None:
     |---|---|---|---|
     | Upper Grande Ronde | ≥ 85 | > 65 and < 85 | ≤ 65 |
     | Catherine Creek | ≥ 75 | > 50 and < 75 | ≤ 50 |
-    | Other basins (default) | ≥ 85 | > 65 and < 85 | ≤ 65 |
 
     These thresholds are applied after computing the weighted score from the selected metrics.
 
