@@ -366,45 +366,39 @@ def render_docs() -> None:
     st.markdown("""
     ### How normalization and user-defined weighting work
 
-    **Goal:** put all input metrics on the same 0–1 scale so you can assign your own weights that sum to **100** and produce a combined **Weighted_Score** in the range **0–100**.
+    **Purpose:**  
+    All input metrics are first standardized to a common 0–1 scale. This allows you to assign your own weights that sum to **100**, producing a final **Weighted_Score** that also ranges from **0 to 100**.
 
-    **Step 1 — Normalize each metric (0–1).**  
-    For every selected metric/field (e.g., *Geomorphic*, *PScore*, *UScore*, the chosen *Current Condition* field, the chosen *Temperature* field, and the chosen *Migration Corridor* field), the app computes a min–max normalization across the currently loaded layer:
+    ---
 
-    \[
-    \text{norm}_i = 
-    \begin{cases}
-    \frac{x_i - \min(x)}{\max(x) - \min(x)}, & \text{if } \max(x) > \min(x) \\\\
-    0, & \text{if } \max(x) = \min(x)\ (\text{constant column})
-    \end{cases}
-    \]
+    **Step 1 — Normalize each metric (0–1)**  
+    Each selected metric (e.g., *Geomorphic*, *PScore*, *UScore*, *Current Condition*, *Temperature*, *Migration Corridor*) is rescaled using **min–max normalization**, where:
 
-    - Values below zero or above zero are handled naturally by min–max; no special casing is needed.  
-    - Non-numeric or missing values are coerced and treated as 0 during normalization.  
-    - Each metric is normalized **independently** within the loaded layer, so the highest value in that field maps to **1** and the lowest to **0** (if the field varies).
+    - The **lowest** score for a metric becomes **0**.  
+    - The **highest** score becomes **1**.  
+    - All other scores fall between 0 and 1.  
 
-    **Step 2 — Apply your weights.**  
-    Use the six sliders to choose weights (points) for each normalized metric. The UI enforces:
+    *Example:*  
+    If the **Geomorphic Potential Score** ranges from 5 to 25, a BSR with a score of 25 becomes **1.0**, and one with a score of 5 becomes **0.0**.
 
-    \[
-    \sum \text{weights} = 100
-    \]
+    ---
 
-    **Step 3 — Compute the combined score (0–100).**  
-    The app multiplies each normalized metric by its weight and sums the results:
+    **Step 2 — Apply user-defined weights**  
+    After normalization, you use six sliders to assign weights (points) to each metric. These weights determine how much influence each metric has on the final score.
 
-    \[
-    \textbf{Weighted\_Score} = \sum_{k} \big(\text{weight}_k \times \text{norm}_k\big)
-    \]
+    *Example:*  
+    If you assign a **Geomorphic weight of 50**, a BSR with a normalized Geomorphic value of **1.0** contributes **50 points** (50 × 1.0), while a BSR with a normalized value of **0.6** contributes **30 points**.
 
-    Because weights sum to 100 and each \\(\text{norm}_k\\) is between 0 and 1, the **Weighted_Score** ranges from **0** to **100**.
+    ---
 
-    **Examples**
-    - If you set all weights to 0 **except** one metric to **100**, the BSR with the **highest** normalized value (1.0) for that metric will receive a **Weighted_Score = 100**, and the BSR with the lowest (0.0) will receive **0**.  
-    - If you split weights (e.g., 50/50 across two metrics), the combined score is the simple weighted sum of their normalized values.
+    **Step 3 — Compute the combined Weighted_Score (0–100)**  
+    The app multiplies each metric’s normalized value by its assigned weight, then sums all results.
 
-    **Downstream use**  
-    After the Weighted_Score is computed, basin-specific thresholds convert it to a **Weighted_Tier** (see Section 1 below). The GeoPackage is **not modified**; results are shown in the app and preview table.
+
+    Because the weights always sum to 100, the final score also ranges between **0 and 100**.
+
+    *Example:*  
+    If you set all weights to 0 **except** one metric to **100**, the BSR with the **highest normalized value** (1.0) for that metric receives a **Weighted_Score = 100**, while the lowest (0.0) receives **0**.
     """)
 
     st.markdown("""
@@ -448,7 +442,7 @@ def render_docs() -> None:
     - **CRITFC:** Valley setting (confined, partly confined, unconfined)
 
     **Qualitative → numeric conversion:** High → 25, Medium → 15, Low → 5  
-    (Contributes **up to 25 points** toward the total 100)
+    (Original score contributes **up to 25 points** toward the total 100. This is normalzied and weighted by the user as described above.)
 
     ---
 
