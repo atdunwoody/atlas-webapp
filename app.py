@@ -359,167 +359,308 @@ def _compute_and_store(
     st.session_state.last_layer_sig = layer_sig
 
 # -------------------------
-# Streamlit app (single-layer compute)
+# Documentation Tab content
+# -------------------------
+def render_docs() -> None:
+    st.header("Methodology & Scoring Documentation")
+    st.markdown("""
+    ### How normalization and user-defined weighting work
+
+    **Goal:** put all input metrics on the same 0–1 scale so you can assign your own weights that sum to **100** and produce a combined **Weighted_Score** in the range **0–100**.
+
+    **Step 1 — Normalize each metric (0–1).**  
+    For every selected metric/field (e.g., *Geomorphic*, *PScore*, *UScore*, the chosen *Current Condition* field, the chosen *Temperature* field, and the chosen *Migration Corridor* field), the app computes a min–max normalization across the currently loaded layer:
+
+    \[
+    \text{norm}_i = 
+    \begin{cases}
+    \frac{x_i - \min(x)}{\max(x) - \min(x)}, & \text{if } \max(x) > \min(x) \\\\
+    0, & \text{if } \max(x) = \min(x)\ (\text{constant column})
+    \end{cases}
+    \]
+
+    - Values below zero or above zero are handled naturally by min–max; no special casing is needed.  
+    - Non-numeric or missing values are coerced and treated as 0 during normalization.  
+    - Each metric is normalized **independently** within the loaded layer, so the highest value in that field maps to **1** and the lowest to **0** (if the field varies).
+
+    **Step 2 — Apply your weights.**  
+    Use the six sliders to choose weights (points) for each normalized metric. The UI enforces:
+
+    \[
+    \sum \text{weights} = 100
+    \]
+
+    **Step 3 — Compute the combined score (0–100).**  
+    The app multiplies each normalized metric by its weight and sums the results:
+
+    \[
+    \textbf{Weighted\_Score} = \sum_{k} \big(\text{weight}_k \times \text{norm}_k\big)
+    \]
+
+    Because weights sum to 100 and each \\(\text{norm}_k\\) is between 0 and 1, the **Weighted_Score** ranges from **0** to **100**.
+
+    **Examples**
+    - If you set all weights to 0 **except** one metric to **100**, the BSR with the **highest** normalized value (1.0) for that metric will receive a **Weighted_Score = 100**, and the BSR with the lowest (0.0) will receive **0**.  
+    - If you split weights (e.g., 50/50 across two metrics), the combined score is the simple weighted sum of their normalized values.
+
+    **Downstream use**  
+    After the Weighted_Score is computed, basin-specific thresholds convert it to a **Weighted_Tier** (see Section 1 below). The GeoPackage is **not modified**; results are shown in the app and preview table.
+    """)
+
+    st.markdown("""
+    ### 1) How BSR tiers are determined
+    Tiers are derived from the **Weighted_Score (0–100)** using basin-specific thresholds:
+
+    | Basin | Tier 1 | Tier 2 | Tier 3 |
+    |---|---|---|---|
+    | Upper Grande Ronde | ≥ 85 | > 65 and < 85 | ≤ 65 |
+    | Catherine Creek | ≥ 75 | > 50 and < 75 | ≤ 50 |
+    | Other basins (default) | ≥ 85 | > 65 and < 85 | ≤ 65 |
+
+    These thresholds are applied after computing the weighted score from the selected metrics.
+
+    ---
+
+    ### 2) Existing Temperature Score
+    If stream temperatures are **poor or lethal**, newly created or existing habitat may not be fully utilized.
+
+    **Primary data layers used by the Science TAC:**
+    - **CRITFC:** Temperature model and Chinook extents
+    - **U.S. Bureau of Reclamation:** FLIR data
+
+    **Qualitative → numeric conversion**
+    - **Catherine Creek:** OK → 0, Lethal → −5  
+    - **Upper Grande Ronde:** Excellent → 5, Good → 3, Fair → 0, Poor → −5
+
+    #### 2.1) CurrTemp 18°C Threshold
+    Weighted by the **% of Spring Chinook streams above 18°C** using **NorWEST** modeled 19-year average August mean temperatures (1993–2011).
+
+    #### 2.2) CurrTemp 22°C Threshold
+    Computed analogously to the 18°C metric but using the **22°C** exceedance.
+
+    ---
+
+    ### 3) Geomorphic Potential Score
+    Targets areas with higher capacity to achieve geomorphic change. Assumes **moderately confined or unconfined** reaches offer greater opportunity to increase **habitat quantity and quality**.
+
+    **Primary data layers:**
+    - **NOAA Science Center:** Chinook intrinsic potential (stream width, valley width, gradient with sediment filter) and **Beechie/Imaki** planform class (confined, island-braided, meandering, straight)
+    - **CRITFC:** Valley setting (confined, partly confined, unconfined)
+
+    **Qualitative → numeric conversion:** High → 25, Medium → 15, Low → 5  
+    (Contributes **up to 25 points** toward the total 100)
+
+    ---
+
+    ### 4) Use (U)-score
+    Ranks BSRs by the number of **critical/imperiled life stages** present and their **High/Medium/Low** rankings based on fish utilization.
+
+    **Qualitative → numeric conversion:** High → 5, Medium → 3, Low → 1  
+    A calibration factor scales this to **up to 25 points** (implementation differed slightly between **Catherine Creek**—emphasizing Chinook—and the **Upper Grande Ronde**—using all three focal species).
+
+    ---
+
+    ### 5) Periodicity (P)-score
+    Counts the number of life stages present per focal species from periodicity tables (length of time present is **not** weighted).  
+    A calibration factor scales the raw count to **up to 25 points** (more species × more life stages → higher score).
+
+    ---
+
+    ### 6) Current Habitat Condition Score
+    Targets areas where improving conditions will yield meaningful gains. Assumes:
+    - **Fair–Good** habitat = strong opportunity for improvement
+    - **Poor** habitat = larger investment for smaller gain
+    - **Excellent** habitat = little room to improve
+
+    **Primary data layers:**
+    - **ODFW:** HabRate model, redd waypoint data, fish utilization layers
+
+    **Qualitative → numeric conversion:**  
+    Excellent → 5, Good → 25, Fair → 25, Poor → 5  
+    (Scaled to **up to 25 points** total)
+
+    **6.1) Current Condition RCAT – Prioritizes poor condition**  
+    _{placeholder}_
+
+    **6.2) Current Condition RCAT – Prioritizes medium condition**  
+    _{placeholder}_
+
+    ---
+
+    ### 7) Migration Corridor Score
+    Weighted number of **Chinook** or **Steelhead** stream miles **upstream of each BSR**. Higher values indicate BSRs that are more critical for **connecting** downstream and upstream habitat networks.
+
+    Reference (conceptual motivation):  
+    **Hahlbeck et al. (2023)** *Ecosphere* — “Habitat fragmentation drives divergent survival strategies of a cold-water fish in a warm landscape.”  
+    Link: https://esajournals.onlinelibrary.wiley.com/doi/full/10.1002/ecs2.4622
+    """)
+
+# -------------------------
+# Streamlit app (single-layer compute) with tabs
 # -------------------------
 def main() -> None:
     st.title("BSR Weighted Scoring & Priority Map")
 
-    uploaded = st.file_uploader("Upload a GeoPackage (optional)", type=["gpkg"])
-    gpkg_default = "data/outputs/base_bsr_scaled_scores.gpkg"
-    gpkg_input = st.text_input(
-        "GeoPackage path",
-        value=gpkg_default,
-        help="If not uploading, provide a path relative to app root."
-    )
+    tab_app, tab_docs = st.tabs(["Map & Scoring", "Documentation"])
 
-    if uploaded is not None:
-        tmp_path = Path("/tmp") / uploaded.name
-        with open(tmp_path, "wb") as f:
-            f.write(uploaded.read())
-        gpkg_path = str(tmp_path)
-        st.info(f"Using uploaded file: {tmp_path.name}")
-    else:
-        gpkg_path = gpkg_input
-
-    # Load the (single) layer
-    try:
-        single_layer_name = get_single_layer_name(gpkg_path)
-        gdf = load_single_layer(gpkg_path)
-        st.caption(f"Loaded layer: **{single_layer_name}**")
-    except Exception as e:
-        st.error(str(e))
-        st.stop()
-
-    # -------------------------
-    # Current Condition selector
-    # -------------------------
-    st.markdown("### Current Condition Field")
-    currcond_options = {
-        'Existing Current Condition': 'CurrCond',
-        'Current Condition RCAT - Prioritizes poor condition': 'CurrCond_RCAT_Linear',
-        'Current Condition RCAT - Prioritizes medium condition': 'CurrCond_RCAT_Quad',
-    }
-    currcond_label = st.selectbox(
-        "Choose the Current Condition metric:",
-        list(currcond_options.keys()),
-        index=0,
-        help="Controls both the weight label and the field used in the weighted score."
-    )
-    currcond_field = currcond_options[currcond_label]
-
-    # -------------------------
-    # CurrTemp selector (NEW)
-    # -------------------------
-    st.markdown("### Temperature Score")
-    currtemp_options = {
-        "Existing CurrTemp": "CurrTemp",
-        "CurrTemp 18C threshold": "CurrTemp18C",
-        "CurrTemp 22C threshold": "CurrTemp22C",
-    }
-    currtemp_label = st.selectbox(
-        "Choose the temperature metric:",
-        list(currtemp_options.keys()),
-        index=0,
-        help="Select which temperature score to include in the weighting."
-    )
-    currtemp_field = currtemp_options[currtemp_label]
-
-    # -------------------------
-    # Migration Corridor selector 
-    # -------------------------
-
-    st.markdown("### Migration Corridor Score")
-    migration_options = {
-        "Migration Corridor Score - Chinook": "MScore_CH",
-        "Migration Corridor Score - Steelhead": "MScore_ST",
-    }
-    migration_label = st.selectbox(
-        "Choose the migration corridor metric:",
-        list(migration_options.keys()),
-        index=0,
-        help="Pick which migration corridor score to include in the weighting."
-    )
-    migration_field = migration_options[migration_label]
-
-
-    # Validate required columns before showing weights
-    dynamic_required = [currcond_field, currtemp_field, migration_field]
-    missing_now = [f for f in (BASE_REQUIRED_FIELDS + dynamic_required) if f not in gdf.columns]
-    if missing_now:
-        st.error(
-            "The layer is missing required fields:\n\n"
-            + ", ".join(missing_now)
-            + "\n\nProvide a layer containing these fields."
+    with tab_app:
+        uploaded = st.file_uploader("Upload a GeoPackage (optional)", type=["gpkg"])
+        gpkg_default = "data/outputs/base_bsr_scaled_scores.gpkg"
+        gpkg_input = st.text_input(
+            "GeoPackage path",
+            value=gpkg_default,
+            help="If not uploading, provide a path relative to app root."
         )
-        st.stop()
 
-    # If inputs changed since last compute, clear previous result to prevent mismatch
-    current_sig = (gpkg_path, single_layer_name, currcond_field, currtemp_field, migration_field)
-    if st.session_state.last_layer_sig is not None and st.session_state.last_layer_sig != current_sig:
-        st.session_state.gdf_scored = None
-        st.session_state.last_weights = None
+        if uploaded is not None:
+            tmp_path = Path("/tmp") / uploaded.name
+            with open(tmp_path, "wb") as f:
+                f.write(uploaded.read())
+            gpkg_path = str(tmp_path)
+            st.info(f"Using uploaded file: {tmp_path.name}")
+        else:
+            gpkg_path = gpkg_input
 
-    # Weights UI (6 components)
-    ns = f"{currcond_field}__{currtemp_field}__{migration_field}"
-    weights, total = weight_inputs(
-        currcond_label=currcond_label,
-        currtemp_label=currtemp_label,
-        mig_label="Migration Corridor",
-        ns=ns,
-    )
-    ready = (total == 100)
-
-    st.markdown("---")
-    st.button(
-        "Compute Weighted Score",
-        type="primary",
-        disabled=not ready,
-        help="Enabled when **this** selection's weights sum to exactly 100",
-        on_click=_compute_and_store,
-        args=(gdf, weights, current_sig, currcond_field, currtemp_field, migration_field),
-        key="compute_btn",
-    )
-
-    # Map style selector (applies to the last computed result)
-    st.markdown("### Map Coloring")
-    map_mode = st.selectbox(
-        "Choose how to color features:",
-        [
-            "Weighted Tier (1 = green, 2 = blue, 3 = red)",
-            "Weighted Score (white → dark green)",
-        ],
-        help="Tier shows discrete priorities; Score shows continuous intensity.",
-    )
-
-    # Persistently display the last computed result (if any)
-    if st.session_state.gdf_scored is not None:
-        if "Weighted_Score" not in st.session_state.gdf_scored.columns:
-            st.error("Weighted_Score not found. Click **Compute**.")
+        # Load the (single) layer
+        try:
+            single_layer_name = get_single_layer_name(gpkg_path)
+            gdf = load_single_layer(gpkg_path)
+            st.caption(f"Loaded layer: **{single_layer_name}**")
+        except Exception as e:
+            st.error(str(e))
             st.stop()
 
-        if map_mode.startswith("Weighted Tier"):
-            m = _tier_map(st.session_state.gdf_scored, fill_opacity=0.55)
-        else:
-            m = _score_map(st.session_state.gdf_scored, fill_opacity=0.55)
-
-        st_folium(m, use_container_width=True, height=720, key="priority_map")
-
-        preview_cols = [
-            "Basin_Name", "Geomorphic", "PScore", "UScore",
-            currcond_field, currtemp_field, migration_field,
-            "Weighted_Score", "Weighted_Tier"
-        ]
-        preview_cols = [c for c in preview_cols if c in st.session_state.gdf_scored.columns]
-
-        with st.expander("Preview of computed attributes (first 10 rows)"):
-            st.dataframe(st.session_state.gdf_scored[preview_cols].head(10))
-
-        st.caption(
-            "Notes: (1) Fields are added in memory only; the GeoPackage is not modified. "
-            "(2) Tier edges: UGR ≤65→3, (65,85)→2, ≥85→1; Catherine ≤50→3, (50,75)→2, ≥75→1."
+        # -------------------------
+        # Current Condition selector
+        # -------------------------
+        st.markdown("### Current Condition Field")
+        currcond_options = {
+            'Existing Current Condition': 'CurrCond',
+            'Current Condition RCAT - Prioritizes poor condition': 'CurrCond_RCAT_Linear',
+            'Current Condition RCAT - Prioritizes medium condition': 'CurrCond_RCAT_Quad',
+        }
+        currcond_label = st.selectbox(
+            "Choose the Current Condition metric:",
+            list(currcond_options.keys()),
+            index=0,
+            help="Controls both the weight label and the field used in the weighted score."
         )
-    else:
-        st.info("Adjust weights so the total equals 100, then click **Compute**.")
+        currcond_field = currcond_options[currcond_label]
+
+        # -------------------------
+        # CurrTemp selector
+        # -------------------------
+        st.markdown("### Temperature Score")
+        currtemp_options = {
+            "Existing CurrTemp": "CurrTemp",
+            "CurrTemp - 18C threshold": "CurrTemp18C",
+            "CurrTemp - 22C threshold": "CurrTemp22C",
+        }
+        currtemp_label = st.selectbox(
+            "Choose the temperature metric:",
+            list(currtemp_options.keys()),
+            index=0,
+            help="Select which temperature score to include in the weighting."
+        )
+        currtemp_field = currtemp_options[currtemp_label]
+
+        # -------------------------
+        # Migration Corridor selector
+        # -------------------------
+        st.markdown("### Migration Corridor Score")
+        migration_options = {
+            "Migration Corridor Score - Chinook": "MScore_CH",
+            "Migration Corridor Score - Steelhead": "MScore_ST",
+        }
+        migration_label = st.selectbox(
+            "Choose the migration corridor metric:",
+            list(migration_options.keys()),
+            index=0,
+            help="Pick which migration corridor score to include in the weighting."
+        )
+        migration_field = migration_options[migration_label]
+
+        # Validate required columns before showing weights
+        dynamic_required = [currcond_field, currtemp_field, migration_field]
+        missing_now = [f for f in (BASE_REQUIRED_FIELDS + dynamic_required) if f not in gdf.columns]
+        if missing_now:
+            st.error(
+                "The layer is missing required fields:\n\n"
+                + ", ".join(missing_now)
+                + "\n\nProvide a layer containing these fields."
+            )
+            st.stop()
+
+        # If inputs changed since last compute, clear previous result to prevent mismatch
+        current_sig = (gpkg_path, single_layer_name, currcond_field, currtemp_field, migration_field)
+        if st.session_state.last_layer_sig is not None and st.session_state.last_layer_sig != current_sig:
+            st.session_state.gdf_scored = None
+            st.session_state.last_weights = None
+
+        # Weights UI (6 components)
+        ns = f"{currcond_field}__{currtemp_field}__{migration_field}"
+        weights, total = weight_inputs(
+            currcond_label=currcond_label,
+            currtemp_label=currtemp_label,
+            mig_label="Migration Corridor",
+            ns=ns,
+        )
+        ready = (total == 100)
+
+        st.markdown("---")
+        st.button(
+            "Compute Weighted Score",
+            type="primary",
+            disabled=not ready,
+            help="Enabled when **this** selection's weights sum to exactly 100",
+            on_click=_compute_and_store,
+            args=(gdf, weights, current_sig, currcond_field, currtemp_field, migration_field),
+            key="compute_btn",
+        )
+
+        # Map style selector (applies to the last computed result)
+        st.markdown("### Map Coloring")
+        map_mode = st.selectbox(
+            "Choose how to color features:",
+            [
+                "Weighted Tier (1 = green, 2 = blue, 3 = red)",
+                "Weighted Score (white → dark green)",
+            ],
+            help="Tier shows discrete priorities; Score shows continuous intensity.",
+        )
+
+        # Persistently display the last computed result (if any)
+        if st.session_state.gdf_scored is not None:
+            if "Weighted_Score" not in st.session_state.gdf_scored.columns:
+                st.error("Weighted_Score not found. Click **Compute**.")
+                st.stop()
+
+            if map_mode.startswith("Weighted Tier"):
+                m = _tier_map(st.session_state.gdf_scored, fill_opacity=0.55)
+            else:
+                m = _score_map(st.session_state.gdf_scored, fill_opacity=0.55)
+
+            st_folium(m, use_container_width=True, height=720, key="priority_map")
+
+            preview_cols = [
+                "Basin_Name", "Geomorphic", "PScore", "UScore",
+                currcond_field, currtemp_field, migration_field,
+                "Weighted_Score", "Weighted_Tier"
+            ]
+            preview_cols = [c for c in preview_cols if c in st.session_state.gdf_scored.columns]
+
+            with st.expander("Preview of computed attributes (first 10 rows)"):
+                st.dataframe(st.session_state.gdf_scored[preview_cols].head(10))
+
+            st.caption(
+                "Notes: (1) Fields are added in memory only; the GeoPackage is not modified. "
+                "(2) Tier edges: UGR ≤65→3, (65,85)→2, ≥85→1; Catherine ≤50→3, (50,75)→2, ≥75→1."
+            )
+        else:
+            st.info("Adjust weights so the total equals 100, then click **Compute**.")
+
+    with tab_docs:
+        render_docs()
 
 if __name__ == "__main__":
     main()
