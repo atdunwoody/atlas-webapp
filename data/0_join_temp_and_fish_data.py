@@ -197,6 +197,7 @@ def join_temp_medians_to_fish(
     # Ensure required fields exist and are numeric
     for fld in value_fields:
         if fld not in temp_gdf.columns:
+            print(temp_gdf.columns)
             raise KeyError(f"Field '{fld}' not found in temperature points.")
         temp_gdf[fld] = pd.to_numeric(temp_gdf[fld], errors="coerce")
 
@@ -298,12 +299,16 @@ def join_fish_fields_to_bsr(
     """
     For each layer in `fish_dist_path` (GPKG), spatially join any number of `value_fields`
     onto the BSR features and write one output layer per fish layer into a GeoPackage.
-    Also adds `species_stream_length` (meters): total length of fish lines within each BSR polygon.
 
-    - Supports N>=0 fields in `value_fields`. When none are present, only counts/lengths are added.
-    - Median aggregation for overlapping fish segments per BSR.
+    Adds:
+      - species_stream_length: total stream length inside each BSR (meters)
+      - percent_above_18C: % of stream miles in each BSR with S1_93_11 > 18
+      - percent_above_22C: % of stream miles in each BSR with S1_93_11 > 22
+
+    Notes:
+      - Lengths are computed in a metric CRS, converted to miles for the percentages.
+      - If S1_93_11 is missing or entirely NaN, percentages are set to 0.0.
     """
-    # --- Validate / resolve output ---
     fish_dist_path = str(fish_dist_path)
     bsr_path = str(bsr_path)
     if out_path is None:
@@ -312,7 +317,7 @@ def join_fish_fields_to_bsr(
     else:
         out_gpkg = str(out_path)
 
-    # --- Read BSR once (preserve its CRS) ---
+    # Read BSR once
     if not Path(bsr_path).exists():
         raise FileNotFoundError(f"BSR path not found: {bsr_path}")
     try:
@@ -325,18 +330,11 @@ def join_fish_fields_to_bsr(
     if bsr.crs is None:
         raise ValueError("BSR dataset has no CRS; cannot perform a safe spatial join.")
 
-    # Stable row id for grouping/merging
     bsr = bsr.reset_index(drop=True).copy()
     bsr["_bsr_id_"] = bsr.index
 
-    # Precompute metric CRS for length calc
     metric_crs = _choose_metric_crs(bsr)
-
-    # --- Iterate fish layers ---
     layers = _list_gpkg_layers(fish_dist_path)
-
-    # ensure we start fresh on first layer write
-    first_write_mode = "w" if not Path(out_gpkg).exists() else "w"
 
     for i, lyr in enumerate(layers):
         try:
@@ -348,7 +346,8 @@ def join_fish_fields_to_bsr(
             warnings.warn(f"Layer '{lyr}' is empty; writing BSR with no added fields.")
             out = bsr.drop(columns=["_bsr_id_"]).copy()
             out = out.reset_index(drop=True)
-            out.columns = [str(c) for c in out.columns]
+            out["percent_above_18C"] = 0.0
+            out["percent_above_22C"] = 0.0
             out_layer = _sanitize_layer_name(f"{lyr}")
             gpd.GeoDataFrame(out, geometry="geometry", crs=bsr.crs).to_file(
                 out_gpkg, layer=out_layer, driver="GPKG", mode=("w" if i == 0 else "a"), index=False
@@ -358,26 +357,24 @@ def join_fish_fields_to_bsr(
         if fish.crs is None:
             raise ValueError(f"Fish layer '{lyr}' has no CRS; cannot join safely.")
 
-        # Require line features for length; filter if needed
+        # Keep only lines for length calculations
         fish_lines = fish[fish.geometry.type.isin(["LineString", "MultiLineString"])].copy()
         if fish_lines.empty:
-            warnings.warn(f"Layer '{lyr}' has no line geometries; length will be 0.")
+            warnings.warn(f"Layer '{lyr}' has no line geometries; lengths will be 0.")
+            fish_lines = fish.copy()
 
-        # Check requested fields (support any number)
+        # Determine which value fields are present
         missing = [c for c in value_fields if c not in fish.columns]
         if missing:
             warnings.warn(f"Layer '{lyr}' missing fields {missing}; medians for those won't be added.")
         present_fields = [c for c in value_fields if c in fish.columns]
 
-        # Build the working fish layer (geom + any present attributes)
+        # Spatial-join to bring medians of present value fields (same as before)
         fish_use_cols = (present_fields + ["geometry"]) if present_fields else ["geometry"]
         fish_use = fish[fish_use_cols].copy()
-
-        # Reproject fish to BSR CRS (for attribute join)
         if fish_use.crs != bsr.crs:
             fish_use = fish_use.to_crs(bsr.crs)
 
-        # Spatial join → many-to-one
         hits = gpd.sjoin(
             bsr[["_bsr_id_", "geometry"]],
             fish_use,
@@ -385,7 +382,6 @@ def join_fish_fields_to_bsr(
             predicate=join_predicate,
         )
 
-        # Count matches per BSR
         match_counts = (
             hits.drop(columns=["geometry"])
             .groupby("_bsr_id_", dropna=False)
@@ -394,7 +390,6 @@ def join_fish_fields_to_bsr(
             .reset_index()
         )
 
-        # Median aggregation for all present_fields
         if present_fields:
             med = (
                 hits.drop(columns=["geometry"])
@@ -406,34 +401,91 @@ def join_fish_fields_to_bsr(
         else:
             agg_df = match_counts
 
-        # --- Compute species_stream_length (meters) via overlay in a metric CRS ---
-        bsr_len = bsr[["_bsr_id_", "geometry"]].to_crs(metric_crs)
-        fish_len = (fish_lines[["geometry"]].to_crs(metric_crs)
-                    if not fish_lines.empty else fish_use[["geometry"]].to_crs(metric_crs))
+        # ---------- Length & temperature-threshold percentages ----------
+        # We need S1_93_11 for thresholding; coerce to numeric if present
+        has_temp = "S1_93_11" in fish_lines.columns
+        if has_temp:
+            fish_lines = fish_lines.copy()
+            fish_lines["S1_93_11"] = pd.to_numeric(fish_lines["S1_93_11"], errors="coerce")
 
-        bsr_len = _make_valid_gdf(bsr_len)
-        fish_len = _make_valid_gdf(fish_len)
+        # Reproject to a metric CRS for length computation
+        bsr_len = _make_valid_gdf(bsr[["_bsr_id_", "geometry"]].to_crs(metric_crs))
+        fish_len_cols = ["geometry"] + (["S1_93_11"] if has_temp else [])
+        fish_len = _make_valid_gdf(fish_lines[fish_len_cols].to_crs(metric_crs))
 
+        # Intersect fish lines with BSR polygons
         inter = gpd.overlay(fish_len, bsr_len, how="intersection")
         if inter.empty:
             length_df = bsr_len[["_bsr_id_"]].copy()
             length_df["species_stream_length"] = 0.0
+            length_df["total_len_miles"] = 0.0
+            length_df["len_gt18_miles"] = 0.0
+            length_df["len_gt22_miles"] = 0.0
         else:
             inter["seg_len_m"] = inter.geometry.length
-            length_df = (
+            M_TO_MILES = 1.0 / 1609.344
+
+            # Total in-BSR length (meters + miles)
+            total_len = (
                 inter.groupby("_bsr_id_", dropna=False)["seg_len_m"]
                 .sum()
                 .rename("species_stream_length")
                 .reset_index()
             )
+            total_len["total_len_miles"] = total_len["species_stream_length"] * M_TO_MILES
 
-        # Merge back onto full BSR attributes
-        out = bsr.merge(agg_df, on="_bsr_id_", how="left")
-        out = out.merge(length_df, on="_bsr_id_", how="left")
+            # Conditional lengths (miles) if we have temperature
+            if has_temp:
+                inter_temp = inter.dropna(subset=["S1_93_11"]).copy()
+
+                gt18 = (
+                    inter_temp[inter_temp["S1_93_11"] > 18]
+                    .groupby("_bsr_id_", dropna=False)["seg_len_m"]
+                    .sum()
+                    .rename("len_gt18_m")
+                    .reset_index()
+                )
+                gt22 = (
+                    inter_temp[inter_temp["S1_93_11"] > 22]
+                    .groupby("_bsr_id_", dropna=False)["seg_len_m"]
+                    .sum()
+                    .rename("len_gt22_m")
+                    .reset_index()
+                )
+                length_df = total_len.merge(gt18, on="_bsr_id_", how="left").merge(gt22, on="_bsr_id_", how="left")
+                length_df["len_gt18_miles"] = length_df["len_gt18_m"].fillna(0.0) * M_TO_MILES
+                length_df["len_gt22_miles"] = length_df["len_gt22_m"].fillna(0.0) * M_TO_MILES
+            else:
+                # No temperature field; conditional lengths are 0
+                length_df = total_len.copy()
+                length_df["len_gt18_miles"] = 0.0
+                length_df["len_gt22_miles"] = 0.0
+
+            # Clean up
+            length_df = length_df[["_bsr_id_", "species_stream_length", "total_len_miles", "len_gt18_miles", "len_gt22_miles"]]
+
+        # Merge attributes back onto BSR
+        out = bsr.merge(agg_df, on="_bsr_id_", how="left").merge(length_df, on="_bsr_id_", how="left")
         out["species_stream_length"] = out["species_stream_length"].fillna(0.0)
-        out = out.drop(columns=["_bsr_id_"])
+        out["total_len_miles"] = out["total_len_miles"].fillna(0.0)
+        out["len_gt18_miles"] = out["len_gt18_miles"].fillna(0.0)
+        out["len_gt22_miles"] = out["len_gt22_miles"].fillna(0.0)
 
-        # --- clean before writing to avoid pyogrio index/schema issues ---
+        # Percentages (avoid divide-by-zero)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            out["percent_above_18C"] = np.where(
+                out["total_len_miles"] > 0,
+                100.0 * (out["len_gt18_miles"] / out["total_len_miles"]),
+                0.0,
+            )
+            out["percent_above_22C"] = np.where(
+                out["total_len_miles"] > 0,
+                100.0 * (out["len_gt22_miles"] / out["total_len_miles"]),
+                0.0,
+            )
+
+        # Clean before writing
+        out = out.drop(columns=["_bsr_id_"], errors="ignore")
         out = out.reset_index(drop=True)
         out = out.drop(columns=[c for c in out.columns if c in {"index_right"}], errors="ignore")
         out.columns = [str(c) for c in out.columns]
@@ -444,22 +496,25 @@ def join_fish_fields_to_bsr(
             layer=out_layer,
             driver="GPKG",
             mode=("w" if i == 0 else "a"),
-            index=False,  # <- important
+            index=False,
         )
 
     return out_gpkg
 
 
+
 if __name__ == "__main__":
     temp_points_gpkg = r"data\inputs\NorWeST_PredictedStreamTempPoints_MidColumbia_MWMT\NorWeST_PredictedStreamTempPoints_MidColumbia_MWMT.shp"
     fish_dist_gpkg = r"data\inputs\All_Fish_Dist.gpkg"
-    fish_dist_path = r"data\outputs\All_Fish_Dist_with_current_temp.gpkg"
-    value_fields = ("S1_93_11", "S30_2040D", "S32_2080D")
-    join_temp_medians_to_fish(temp_points_gpkg, fish_dist_gpkg, fish_dist_path, value_fields= value_fields)
+    fish_dist_path = r"data\outputs\All_Fish_Dist_with_temp.gpkg"
+    value_fields = ("S1_93_11", "S30_2040D", "S32_2080D", 
+                    #"S41_2080M", "S37_9311M"
+                    )
+    join_temp_medians_to_fish(temp_points_gpkg, fish_dist_gpkg, fish_dist_path, value_fields = value_fields)
 
-    bsr_path = r"data\inputs\base_bsr.gpkg"
-    fish_dist_path = r"data\outputs\All_Fish_Dist_with_current_temp.gpkg"
-    bsr_temp_path = r"data\outputs\base_bsr_with_current_temp.gpkg"
+    bsr_path = r"data\inputs\BSR_net_analysis.gpkg"
+    fish_dist_path = r"data\outputs\All_Fish_Dist_with_temp.gpkg"
+    bsr_temp_path = r"data\outputs\base_bsr_scaled_scores.gpkg"
 
     # If bsr_path is a .shp, outputs will be written to a sibling .gpkg with the same stem.
     out_gpkg_written = join_fish_fields_to_bsr(fish_dist_path, bsr_path, out_path = bsr_temp_path, value_fields= value_fields)
