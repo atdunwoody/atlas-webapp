@@ -198,11 +198,10 @@ def compute_weighted_fields(
     migration_field: str,
 ) -> gpd.GeoDataFrame:
     """
-    Normalize each metric to [0,1] using min–max, then compute a 0–100 score:
-        Weighted_Score = sum_i ( weight_i * norm_i )
-    where the UI enforces sum(weights) == 100.
+    Normalize each metric to [0,1] using min–max, then compute:
+      - Per-metric weighted columns W_<field> = weight * norm (0–100 scale contribution)
+      - Combined Weighted_Score = sum of per-metric weighted columns (0–100)
     """
-    # Validate columns
     required = BASE_REQUIRED_FIELDS + [currcond_field, currtemp_field, migration_field]
     missing = [c for c in required if c not in gdf.columns]
     if missing:
@@ -220,20 +219,21 @@ def compute_weighted_fields(
         "Migration_Weight": migration_field,
     }
 
-    # Build normalized columns (0–1)
+    # Build normalized columns (0–1) and per-metric weighted columns (0–100)
     norm_cols = {}
+    weighted_cols = []
     for w_key, col in field_map.items():
         ncol = f"{col}_norm"
         gdf[ncol] = _minmax_norm(gdf[col])
         norm_cols[w_key] = ncol
 
-    # Weighted sum (weights sum to 100 → score in [0,100])
-    ws = 0.0
-    for w_key, ncol in norm_cols.items():
         w = float(weights.get(w_key, 0))
-        ws = ws + w * gdf[ncol]
+        wcol = f"W_{col}"   # e.g., W_Geomorphic, W_CurrTemp18C, etc.
+        gdf[wcol] = (w * gdf[ncol]).astype(float)
+        weighted_cols.append(wcol)
 
-    gdf["Weighted_Score"] = ws.astype(float).clip(lower=0.0, upper=100.0).round(2)
+    # Weighted sum (weights sum to 100 → score in [0,100])
+    gdf["Weighted_Score"] = gdf[weighted_cols].sum(axis=1).clip(lower=0.0, upper=100.0).round(2)
 
     # Tier logic (unchanged)
     def tier_row(basin: str, score: float) -> int:
@@ -249,6 +249,7 @@ def compute_weighted_fields(
     gdf["Weighted_Tier"] = [tier_row(b, s) for b, s in zip(gdf["Basin_Name"], gdf["Weighted_Score"])]
 
     return gdf
+
 
 # -------------------------
 # Map rendering
@@ -273,7 +274,7 @@ def _tier_map(
     x_min, y_min, x_max, y_max = gdf.total_bounds
     m.fit_bounds([[y_min, x_min], [y_max, x_max]])
 
-    fields = [f for f in ["Basin_Name", "Weighted_Tier", "Weighted_Score"] if f in gdf.columns]
+    fields = [f for f in ["BSR", "Weighted_Tier", "Weighted_Score"] if f in gdf.columns]
     aliases = [f"{f}:" for f in fields]
 
     folium.GeoJson(
@@ -325,7 +326,7 @@ def _score_map(
     x_min, y_min, x_max, y_max = gdf.total_bounds
     m.fit_bounds([[y_min, x_min], [y_max, x_max]])
 
-    fields = [f for f in ["Basin_Name", "Weighted_Tier", "Weighted_Score"] if f in gdf.columns]
+    fields = [f for f in ["BSR", "Weighted_Tier", "Weighted_Score"] if f in gdf.columns]
     aliases = [f"{f}:" for f in fields]
 
     folium.GeoJson(
@@ -591,7 +592,7 @@ def main() -> None:
         weights, total = weight_inputs(
             currcond_label=currcond_label,
             currtemp_label=currtemp_label,
-            mig_label="Migration Corridor",
+            mig_label=migration_label,
             ns=ns,
         )
         ready = (total == 100)
@@ -631,15 +632,39 @@ def main() -> None:
 
             st_folium(m, use_container_width=True, height=720, key="priority_map")
 
+           # Build preview columns including per-metric weighted contributions
+            weighted_cols_preview = [
+                f"W_Geomorphic",
+                f"W_PScore",
+                f"W_UScore",
+                f"W_{currcond_field}",
+                f"W_{currtemp_field}",
+                f"W_{migration_field}",
+            ]
+
             preview_cols = [
-                "BSR", "Geomorphic", "PScore", "UScore",
-                currcond_field, currtemp_field, migration_field,
+                "BSR", 
+                f"W_Geomorphic",
+                f"W_PScore",
+                f"W_UScore",
+                f"W_{currcond_field}",
+                f"W_{currtemp_field}",
+                f"W_{migration_field}",
                 "Weighted_Score", "Weighted_Tier"
             ]
+
+            # Only keep columns that exist
             preview_cols = [c for c in preview_cols if c in st.session_state.gdf_scored.columns]
 
-            with st.expander("Preview of computed attributes (first 10 rows)"):
-                st.dataframe(st.session_state.gdf_scored[preview_cols].head(10))
+            with st.expander("Table of new weighted metrics:"):
+                # Round the W_* contributions for readability in the preview only
+                df_prev = st.session_state.gdf_scored[preview_cols].copy()
+
+                for c in weighted_cols_preview + ["Weighted_Score"]:
+                    if c in df_prev.columns:
+                        df_prev[c] = pd.to_numeric(df_prev[c], errors="coerce").round(2)
+                # Drop the index so it doesn’t show in Streamlit
+                st.dataframe(df_prev.reset_index(drop=True))
 
             st.caption(
                 "Notes: (1) Fields are added in memory only; the GeoPackage is not modified. "
