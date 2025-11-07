@@ -180,13 +180,15 @@ def weight_inputs(currcond_label: str, currtemp_label: str, mig_label: str, ns: 
 BASE_REQUIRED_FIELDS = ["Geomorphic", "PScore", "UScore", "Basin_Name"]
 
 def _minmax_norm(s: pd.Series) -> pd.Series:
-    s = pd.to_numeric(s, errors="coerce").fillna(0.0)
-    mn = float(s.min())
-    mx = float(s.max())
-    if mx > mn:
-        return (s - mn) / (mx - mn)
-    # constant column -> all zeros
-    return pd.Series(0.0, index=s.index, dtype="float64")
+    s = pd.to_numeric(s, errors="coerce")
+    mn = float(s.min(skipna=True))
+    mx = float(s.max(skipna=True))
+    if pd.isna(mn) or pd.isna(mx) or mx == mn:
+        # all NaN or constant → return 0s
+        return pd.Series(0.0, index=s.index, dtype="float64")
+    out = (s - mn) / (mx - mn)
+    return out.fillna(0.0).astype("float64")
+
 
 def compute_weighted_fields(
     gdf: gpd.GeoDataFrame,
@@ -357,7 +359,6 @@ def _compute_and_store(
     st.session_state.gdf_scored = gdf_scored
     st.session_state.last_weights = weights.copy()
     st.session_state.last_layer_sig = layer_sig
-
 # -------------------------
 # Documentation Tab content
 # -------------------------
@@ -367,7 +368,7 @@ def render_docs() -> None:
     ### How normalization and user-defined weighting work
 
     **Purpose:**  
-    All input metrics are first standardized to a common 0–1 scale. This allows you to assign your own weights that sum to **100**, producing a final **Weighted_Score** that also ranges from **0 to 100**.
+    All input metrics are first standardized to a common 0–1 scale. This allows you to assign your own weights to each of the metrics, producing a final **BSR Tiering Score** that ranges from **0 to 100**.
 
     ---
 
@@ -379,12 +380,12 @@ def render_docs() -> None:
     - All other scores fall between 0 and 1.  
 
     *Example:*  
-    If the **Geomorphic Potential Score** ranges from 5 to 25, a BSR with a score of 25 becomes **1.0**, and one with a score of 5 becomes **0.0**.
+    The **Geomorphic Potential Score** ranges from 5 to 25, so a BSR with a score of 25 becomes **1.0**, and one with a score of 5 becomes **0.0**.
 
     ---
 
     **Step 2 — Apply user-defined weights**  
-    After normalization, you use six sliders to assign weights (points) to each metric. These weights determine how much influence each metric has on the final score.
+    After normalization, you use six sliders to assign weights to each metric. These weights determine how much influence each metric has on the final score.
 
     *Example:*  
     If you assign a **Geomorphic weight of 50**, a BSR with a normalized Geomorphic value of **1.0** contributes **50 points** (50 × 1.0), while a BSR with a normalized value of **0.6** contributes **30 points**.
@@ -397,8 +398,6 @@ def render_docs() -> None:
 
     Because the weights always sum to 100, the final score also ranges between **0 and 100**.
 
-    *Example:*  
-    If you set all weights to 0 **except** one metric to **100**, the BSR with the **highest normalized value** (1.0) for that metric receives a **Weighted_Score = 100**, while the lowest (0.0) receives **0**.
     """)
 
     st.markdown("""
@@ -407,8 +406,8 @@ def render_docs() -> None:
 
     | Basin | Tier 1 | Tier 2 | Tier 3 |
     |---|---|---|---|
-    | Upper Grande Ronde | ≥ 85 | > 65 and < 85 | ≤ 65 |
-    | Catherine Creek | ≥ 75 | > 50 and < 75 | ≤ 50 |
+    | Upper Grande Ronde | 85 - 100 | 65 - 85 | 0 - 65 |
+    | Catherine Creek | 75 - 100 | 50 - 75 | 0 - 50 |
 
     These thresholds are applied after computing the weighted score from the selected metrics.
 
@@ -426,7 +425,7 @@ def render_docs() -> None:
     - **Upper Grande Ronde:** Excellent → 5, Good → 3, Fair → 0, Poor → −5
 
     #### 2.1) CurrTemp 18°C Threshold
-    Weighted by the **% of Spring Chinook streams above 18°C** using **NorWEST** modeled 19-year average August mean temperatures (1993–2011).
+    Weighted by the **% of Spring Chinook streams above 18°C** within each BSR using **NorWEST** modeled 19-year average August mean temperatures (1993–2011).
 
     #### 2.2) CurrTemp 22°C Threshold
     Computed analogously to the 18°C metric but using the **22°C** exceedance.
@@ -449,7 +448,7 @@ def render_docs() -> None:
     Ranks BSRs by the number of **critical/imperiled life stages** present and their **High/Medium/Low** rankings based on fish utilization.
 
     **Qualitative → numeric conversion:** High → 5, Medium → 3, Low → 1  
-    A calibration factor scales this to **up to 25 points** (implementation differed slightly between **Catherine Creek**—emphasizing Chinook—and the **Upper Grande Ronde**—using all three focal species).
+    A calibration factor scales this to **up to 25 points** (implementation differed slightly between **Catherine Creek**, which emphasized Chinook, and the **Upper Grande Ronde**, which used all three focal species).
 
     ---
 
@@ -488,9 +487,6 @@ def render_docs() -> None:
     Link: https://esajournals.onlinelibrary.wiley.com/doi/full/10.1002/ecs2.4622
     """)
 
-# -------------------------
-# Streamlit app (single-layer compute) with tabs
-# -------------------------
 def main() -> None:
     st.title("BSR Weighted Scoring & Priority Map")
 
@@ -612,14 +608,14 @@ def main() -> None:
         )
 
         # Map style selector (applies to the last computed result)
-        st.markdown("### Map Coloring")
+        st.markdown("### New BSR Tiers")
         map_mode = st.selectbox(
-            "Choose how to color features:",
+            "Select map display:",
             [
-                "Weighted Tier (1 = green, 2 = blue, 3 = red)",
-                "Weighted Score (white → dark green)",
+                "Weighted BSR Tier (1 = green, 2 = blue, 3 = red)",
+                "Weighted BSR Score (white → dark green)",
             ],
-            help="Tier shows discrete priorities; Score shows continuous intensity.",
+            help="Tier shows BSR rankings resulting from weights; Score shows weighted BSR score.",
         )
 
         # Persistently display the last computed result (if any)
@@ -628,7 +624,7 @@ def main() -> None:
                 st.error("Weighted_Score not found. Click **Compute**.")
                 st.stop()
 
-            if map_mode.startswith("Weighted Tier"):
+            if map_mode.startswith("Weighted BSR Tier"):
                 m = _tier_map(st.session_state.gdf_scored, fill_opacity=0.55)
             else:
                 m = _score_map(st.session_state.gdf_scored, fill_opacity=0.55)
@@ -636,7 +632,7 @@ def main() -> None:
             st_folium(m, use_container_width=True, height=720, key="priority_map")
 
             preview_cols = [
-                "Basin_Name", "Geomorphic", "PScore", "UScore",
+                "BSR", "Geomorphic", "PScore", "UScore",
                 currcond_field, currtemp_field, migration_field,
                 "Weighted_Score", "Weighted_Tier"
             ]
