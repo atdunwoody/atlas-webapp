@@ -178,6 +178,7 @@ def weight_inputs(currcond_label: str, currtemp_label: str, mig_label: str, ns: 
 # Scoring & tiering (fixed)
 # -------------------------
 BASE_REQUIRED_FIELDS = ["Geomorphic", "PScore", "UScore", "Basin_Name"]
+WEIGHTS_NS = "weights_v1"  # stable key namespace for all weight widgets
 
 def _minmax_norm(s: pd.Series) -> pd.Series:
     s = pd.to_numeric(s, errors="coerce")
@@ -588,7 +589,7 @@ def main() -> None:
             st.session_state.last_weights = None
 
         # Weights UI (6 components)
-        ns = f"{currcond_field}__{currtemp_field}__{migration_field}"
+        ns = WEIGHTS_NS
         weights, total = weight_inputs(
             currcond_label=currcond_label,
             currtemp_label=currtemp_label,
