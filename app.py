@@ -617,7 +617,7 @@ def main() -> None:
         currcond_options = {
             'Existing Current Condition': 'CurrCond',
             'Current Condition RCAT - Prioritizes poor condition': 'CurrCond_RCAT_Linear',
-            'Current Condition RCAT - Prioritizes medium condition': 'CurrCond_RCAT_Quad',
+            'Current Condition RCAT - Prioritizes medium condition': 'CurrCond_RCAT_Quad ',
         }
         currcond_label = st.selectbox(
             "Choose the Current Condition metric:",
