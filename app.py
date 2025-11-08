@@ -27,6 +27,81 @@ def _init_state() -> None:
 _init_state()
 
 # -------------------------
+# Tier threshold defaults & UI
+# -------------------------
+TIER_NS = "tier_cfg_v1"
+
+DEFAULT_TIER_THRESHOLDS = {
+    "Upper Grande Ronde": {"t1_min": 85.0, "t2_min": 65.0},
+    "Catherine Creek": {"t1_min": 75.0, "t2_min": 50.0},
+    "_default": {"t1_min": 85.0, "t2_min": 65.0},  # used for any other basin names
+}
+
+def _init_tier_state() -> None:
+    ss = st.session_state
+    ss.setdefault(TIER_NS, {})
+    for basin, vals in DEFAULT_TIER_THRESHOLDS.items():
+        ss[TIER_NS].setdefault(basin, dict(vals))  # shallow copy
+
+def tier_inputs() -> Tuple[Dict[str, Dict[str, float]], bool, Optional[str]]:
+    """
+    Render UI to configure tier thresholds for each basin.
+    Returns (cfg, is_valid, error_msg).
+    cfg format:
+      { 'Upper Grande Ronde': {'t1_min': float, 't2_min': float},
+        'Catherine Creek':    {'t1_min': float, 't2_min': float},
+    """
+    _init_tier_state()
+    ss = st.session_state[TIER_NS]
+
+    st.markdown("### Tier thresholds (per basin)")
+    st.markdown("""
+    **Rule:** All BSRs are scored as:
+
+    - **Tier 1**  Weighted BSR Score ≥ Tier 1 Lower Bound
+    - **Tier 2** Tier 1 Lower Bound ≥ Weighted BSR Score ≥ Tier 2 Lower Bound
+    - **Tier 3**  Tier 2 Lower Bound ≥ Weighted BSR Score 
+    """)
+
+
+    cols = st.columns(3)
+    basins_order = ["Upper Grande Ronde", "Catherine Creek"]
+    labels = {
+        "Upper Grande Ronde": "Upper Grande Ronde",
+        "Catherine Creek": "Catherine Creek",
+    }
+
+    for basin, col in zip(basins_order, cols):
+        with col:
+            st.write(f"**{labels[basin]}**")
+            t1 = st.number_input(
+                f"Tier 1 Lower Bound",
+                min_value=0.0, max_value=100.0, step=1.0,
+                value=float(ss[basin]["t1_min"]),
+                key=f"{TIER_NS}_{basin}_t1",
+                help="Scores at or above this go to Tier 1"
+            )
+            t2 = st.number_input(
+                f"Tier 2 Lower Bound",
+                min_value=0.0, max_value=100.0, step=1.0,
+                value=float(ss[basin]["t2_min"]),
+                key=f"{TIER_NS}_{basin}_t2",
+                help="Scores at or above this (but below Tier 1 min) go to Tier 2"
+            )
+            ss[basin]["t1_min"] = float(t1)
+            ss[basin]["t2_min"] = float(t2)
+
+    # Validate
+    for basin, vals in ss.items():
+        if basin not in labels:  # ignore any stray keys
+            continue
+        t1, t2 = vals["t1_min"], vals["t2_min"]
+        if not (0.0 <= t2 <= t1 <= 100.0):
+            return ss, False, f"Invalid thresholds for {labels.get(basin, basin)}: require 0 ≤ Tier2 min ≤ Tier1 min ≤ 100."
+
+    return ss, True, None
+
+# -------------------------
 # Path utilities & validation
 # -------------------------
 def resolve_gpkg_path(raw_path: str) -> Path:
@@ -197,11 +272,13 @@ def compute_weighted_fields(
     currcond_field: str,
     currtemp_field: str,
     migration_field: str,
+    tier_cfg: Dict[str, Dict[str, float]],
 ) -> gpd.GeoDataFrame:
     """
     Normalize each metric to [0,1] using min–max, then compute:
       - Per-metric weighted columns W_<field> = weight * norm (0–100 scale contribution)
       - Combined Weighted_Score = sum of per-metric weighted columns (0–100)
+      - Weighted_Tier using user-defined basin thresholds in tier_cfg
     """
     required = BASE_REQUIRED_FIELDS + [currcond_field, currtemp_field, migration_field]
     missing = [c for c in required if c not in gdf.columns]
@@ -220,36 +297,35 @@ def compute_weighted_fields(
         "Migration_Weight": migration_field,
     }
 
-    # Build normalized columns (0–1) and per-metric weighted columns (0–100)
-    norm_cols = {}
+    # Build normalized and weighted columns
     weighted_cols = []
     for w_key, col in field_map.items():
         ncol = f"{col}_norm"
         gdf[ncol] = _minmax_norm(gdf[col])
-        norm_cols[w_key] = ncol
-
         w = float(weights.get(w_key, 0))
-        wcol = f"W_{col}"   # e.g., W_Geomorphic, W_CurrTemp18C, etc.
+        wcol = f"W_{col}"
         gdf[wcol] = (w * gdf[ncol]).astype(float)
         weighted_cols.append(wcol)
 
-    # Weighted sum (weights sum to 100 → score in [0,100])
+    # Weighted sum
     gdf["Weighted_Score"] = gdf[weighted_cols].sum(axis=1).clip(lower=0.0, upper=100.0).round(2)
 
-    # Tier logic (unchanged)
-    def tier_row(basin: str, score: float) -> int:
+    # Tiering using user-configured thresholds
+    def pick_tier(basin: str, score: float) -> int:
         b = str(basin).strip()
+        cfg = tier_cfg.get(b, tier_cfg.get("_default", {"t1_min": 85.0, "t2_min": 65.0}))
+        t1, t2 = float(cfg["t1_min"]), float(cfg["t2_min"])
         s = float(score)
-        if b == "Upper Grande Ronde":
-            return 3 if s <= 65 else (2 if s < 85 else 1)
-        elif b == "Catherine Creek":
-            return 3 if s <= 50 else (2 if s < 75 else 1)
+        if s >= t1:
+            return 1
+        elif s >= t2:
+            return 2
         else:
-            return 3 if s <= 65 else (2 if s < 85 else 1)
+            return 3
 
-    gdf["Weighted_Tier"] = [tier_row(b, s) for b, s in zip(gdf["Basin_Name"], gdf["Weighted_Score"])]
-
+    gdf["Weighted_Tier"] = [pick_tier(b, s) for b, s in zip(gdf["Basin_Name"], gdf["Weighted_Score"])]
     return gdf
+
 
 
 # -------------------------
@@ -351,16 +427,20 @@ def _compute_and_store(
     currcond_field: str,
     currtemp_field: str,
     migration_field: str,
+    tier_cfg: Dict[str, Dict[str, float]],
 ) -> None:
     """Compute fields and store results in session_state."""
     try:
-        gdf_scored = compute_weighted_fields(gdf, weights, currcond_field, currtemp_field, migration_field)
+        gdf_scored = compute_weighted_fields(
+            gdf, weights, currcond_field, currtemp_field, migration_field, tier_cfg
+        )
     except Exception as e:
         st.error(f"Failed to compute weighted fields: {e}")
         return
     st.session_state.gdf_scored = gdf_scored
     st.session_state.last_weights = weights.copy()
     st.session_state.last_layer_sig = layer_sig
+
 # -------------------------
 # Documentation Tab content
 # -------------------------
@@ -482,7 +562,7 @@ def render_docs() -> None:
     ---
 
     ### 7) Migration Corridor Score
-    Weighted number of **Chinook** or **Steelhead** stream miles **upstream of each BSR**. Higher values indicate BSRs that are more critical for connecting upstream habitat networks.
+    Weighted number of **Chinook** or **Steelhead** stream miles **upstream of each BSR**. Higher values indicate BSRs that are more critical for connecting upstream habitat.
 
     Reference (conceptual motivation):  
     **Hahlbeck et al. (2023)** *Ecosphere* — “Habitat fragmentation drives divergent survival strategies of a cold-water fish in a warm landscape.”  
@@ -503,6 +583,7 @@ def main() -> None:
             help="If not uploading, provide a path relative to app root."
         )
 
+
         if uploaded is not None:
             tmp_path = Path("/tmp") / uploaded.name
             with open(tmp_path, "wb") as f:
@@ -520,6 +601,14 @@ def main() -> None:
         except Exception as e:
             st.error(str(e))
             st.stop()
+
+        # -------------------------
+        # Tier threshold selectors
+        # -------------------------
+        tier_cfg, tier_ok, tier_err = tier_inputs()
+        if not tier_ok:
+            st.error(tier_err)
+
 
         # -------------------------
         # Current Condition selector
@@ -567,7 +656,7 @@ def main() -> None:
             "Choose the migration corridor metric:",
             list(migration_options.keys()),
             index=0,
-            help="These metrics represent the weighted number of **Chinook** or **Steelhead** stream miles **upstream of each BSR**. Higher values indicate BSRs that are more critical for connecting upstream habitat networks."
+            help="These metrics represent the weighted number of **Chinook** or **Steelhead** stream miles **upstream of each BSR**. Higher values indicate BSRs that are more critical for connecting upstream habitat."
         )
         migration_field = migration_options[migration_label]
 
@@ -602,12 +691,13 @@ def main() -> None:
         st.button(
             "Compute Weighted Score",
             type="primary",
-            disabled=not ready,
-            help="Enabled when **this** selection's weights sum to exactly 100",
+            disabled=not ready or not tier_ok,
+            help="Enabled when weights sum to 100 and tier thresholds are valid.",
             on_click=_compute_and_store,
-            args=(gdf, weights, current_sig, currcond_field, currtemp_field, migration_field),
+            args=(gdf, weights, current_sig, currcond_field, currtemp_field, migration_field, tier_cfg),
             key="compute_btn",
         )
+
 
         # Map style selector (applies to the last computed result)
         st.markdown("### New BSR Tiers")
@@ -668,9 +758,13 @@ def main() -> None:
                 st.dataframe(df_prev.reset_index(drop=True))
 
             st.caption(
-                "Notes: (1) Fields are added in memory only; the GeoPackage is not modified. "
-                "(2) Tier edges: UGR ≤65→3, (65,85)→2, ≥85→1; Catherine ≤50→3, (50,75)→2, ≥75→1."
+                f"Notes: Fields are added in memory only; the GeoPackage is not modified. "
+                f"Current tier cutoffs — UGR: ≥{tier_cfg['Upper Grande Ronde']['t1_min']:.0f}→Tier 1, "
+                f"≥{tier_cfg['Upper Grande Ronde']['t2_min']:.0f}→Tier 2; "
+                f"Catherine: ≥{tier_cfg['Catherine Creek']['t1_min']:.0f}→Tier 1, "
+                f"≥{tier_cfg['Catherine Creek']['t2_min']:.0f}→Tier 2."
             )
+
         else:
             st.info("Adjust weights so the total equals 100, then click **Compute**.")
 
