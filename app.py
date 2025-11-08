@@ -482,7 +482,7 @@ def render_docs() -> None:
     ---
 
     ### 7) Migration Corridor Score
-    Weighted number of **Chinook** or **Steelhead** stream miles **upstream of each BSR**. Higher values indicate BSRs that are more critical for **connecting** downstream and upstream habitat networks.
+    Weighted number of **Chinook** or **Steelhead** stream miles **upstream of each BSR**. Higher values indicate BSRs that are more critical for connecting upstream habitat networks.
 
     Reference (conceptual motivation):  
     **Hahlbeck et al. (2023)** *Ecosphere* — “Habitat fragmentation drives divergent survival strategies of a cold-water fish in a warm landscape.”  
@@ -567,7 +567,7 @@ def main() -> None:
             "Choose the migration corridor metric:",
             list(migration_options.keys()),
             index=0,
-            help="Pick which migration corridor score to include in the weighting."
+            help="These metrics represent the weighted number of **Chinook** or **Steelhead** stream miles **upstream of each BSR**. Higher values indicate BSRs that are more critical for connecting upstream habitat networks."
         )
         migration_field = migration_options[migration_label]
 
