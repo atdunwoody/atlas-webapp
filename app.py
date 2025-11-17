@@ -519,8 +519,6 @@ def render_docs() -> None:
     **Purpose:**  
     All input metrics are first standardized to a common 0–1 scale. This allows you to assign your own weights to each of the metrics, producing a final **BSR Tiering Score** that ranges from **0 to 100**.
 
-    ---
-
     **Step 1 — Normalize each metric (0–1)**  
     Each selected metric (e.g., *Geomorphic*, *PScore*, *UScore*, *Current Condition*, *Temperature*, *Migration Corridor*) is rescaled using **min–max normalization**, where:
 
@@ -531,109 +529,47 @@ def render_docs() -> None:
     *Example:*  
     The **Geomorphic Potential Score** ranges from 5 to 25, so a BSR with a score of 25 becomes **1.0**, and one with a score of 5 becomes **0.0**.
 
-    ---
-
     **Step 2 — Apply user-defined weights**  
     After normalization, you use six sliders to assign weights to each metric. These weights determine how much influence each metric has on the final score.
 
     *Example:*  
     If you assign a **Geomorphic weight of 50**, a BSR with a normalized Geomorphic value of **1.0** contributes **50 points** (50 × 1.0), while a BSR with a normalized value of **0.6** contributes **30 points**.
 
-    ---
-
     **Step 3 — Compute the combined Weighted_Score (0–100)**  
     The app multiplies each metric’s normalized value by its assigned weight, then sums all results.
 
 
     Because the weights always sum to 100, the final score also ranges between **0 and 100**.
-
+    
+    ---
     """)
 
     st.markdown("""
-    ### 1) How BSR tiers are determined
-    Tiers are derived from the **Weighted_Score (0–100)** using basin-specific thresholds:
 
-    | Basin | Tier 1 | Tier 2 | Tier 3 |
-    |---|---|---|---|
-    | Upper Grande Ronde | 85 - 100 | 65 - 85 | 0 - 65 |
-    | Catherine Creek | 75 - 100 | 50 - 75 | 0 - 50 |
-
-    These thresholds are applied after computing the weighted score from the selected metrics.
-
-    ---
-
-    ### 2) Existing Temperature Score
-    If stream temperatures are **poor or lethal**, newly created or existing habitat may not be fully utilized.
-
-    **Primary data layers used by the Science TAC:**
-    - **CRITFC:** Temperature model and Chinook extents
-    - **U.S. Bureau of Reclamation:** FLIR data
-
-    **Qualitative → numeric conversion**
-    - **Catherine Creek:** OK → 0, Lethal → −5  
-    - **Upper Grande Ronde:** Excellent → 5, Good → 3, Fair → 0, Poor → −5
-
-    #### 2.1) CurrTemp 18°C Threshold
+    ### New Metrics in This Webapp  
+    #### 1) CurrTemp 18°C Threshold
     Weighted by the **% of Spring Chinook streams above 18°C** within each BSR using **NorWEST** modeled 19-year average August mean temperatures (1993–2011).
 
-    #### 2.2) CurrTemp 22°C Threshold
+    #### 2) CurrTemp 22°C Threshold
     Computed analogously to the 18°C metric but using the **22°C** exceedance.
 
-    ---
-
-    ### 3) Geomorphic Potential Score
-    Targets areas with higher capacity to achieve geomorphic change. Assumes **moderately confined or unconfined** reaches offer greater opportunity to increase **habitat quantity and quality**.
-
-    **Primary data layers:**
-    - **NOAA Science Center:** Chinook intrinsic potential (stream width, valley width, gradient with sediment filter) and **Beechie/Imaki** planform class (confined, island-braided, meandering, straight)
-    - **CRITFC:** Valley setting (confined, partly confined, unconfined)
-
-    **Qualitative → numeric conversion:** High → 25, Medium → 15, Low → 5  
-    (Original score contributes **up to 25 points** toward the total 100. This is normalzied and weighted by the user as described above.)
-
-    ---
-
-    ### 4) Use (U)-score
-    Ranks BSRs by the number of **critical/imperiled life stages** present and their **High/Medium/Low** rankings based on fish utilization.
-
-    **Qualitative → numeric conversion:** High → 5, Medium → 3, Low → 1  
-    A calibration factor scales this to **up to 25 points** (implementation differed slightly between **Catherine Creek**, which emphasized Chinook, and the **Upper Grande Ronde**, which used all three focal species).
-
-    ---
-
-    ### 5) Periodicity (P)-score
-    Counts the number of life stages present per focal species from periodicity tables (length of time present is **not** weighted).  
-    A calibration factor scales the raw count to **up to 25 points** (more species × more life stages → higher score).
-
-    ---
-
-    ### 6) Current Habitat Condition Score
-    Targets areas where improving conditions will yield meaningful gains. Assumes:
-    - **Fair–Good** habitat = strong opportunity for improvement
-    - **Poor** habitat = larger investment for smaller gain
-    - **Excellent** habitat = little room to improve
-
-    **Primary data layers:**
-    - **ODFW:** HabRate model, redd waypoint data, fish utilization layers
-
-    **Qualitative → numeric conversion:**  
-    Excellent → 5, Good → 25, Fair → 25, Poor → 5  
-    (Scaled to **up to 25 points** total)
-
-    **6.1) Current Condition RCAT – Prioritizes poor condition**  
+    #### 3) Current Condition RCAT – Prioritizes poor condition
     _{placeholder}_
 
-    **6.2) Current Condition RCAT – Prioritizes medium condition**  
+    #### 4) Current Condition RCAT – Prioritizes medium condition  
     _{placeholder}_
 
-    ---
-
-    ### 7) Migration Corridor Score
+    #### 5) Migration Corridor Score
     Weighted number of **Chinook** or **Steelhead** stream miles **upstream of each BSR**. Higher values indicate BSRs that are more critical for connecting upstream habitat.
 
     Reference (conceptual motivation):  
     **Hahlbeck et al. (2023)** *Ecosphere* — “Habitat fragmentation drives divergent survival strategies of a cold-water fish in a warm landscape.”  
     Link: https://esajournals.onlinelibrary.wiley.com/doi/full/10.1002/ecs2.4622
+    
+    ---
+    
+    Please refer to the following memo for more information on scoring formulas and criteria:
+    **Lichen Land & Water Inc. (2025).** *Atlas Review and Roadmap for Potential Updates (2025) at BSR-Level.* Submitted to GRMW, November 2025.
     """)
 
 def main() -> None:
@@ -698,8 +634,8 @@ def main() -> None:
             value=False,
             help=(
                 "If checked, all Tier 1 BSRs will have their scores set to"
-                "'Poor' condition (i.e. value of 5)before scaling and calculation"
-                "of the new scoring."
+                " 'Poor' condition (i.e. value of 5) before scaling and calculation"
+                " of the new scoring."
             ),
         )
 
