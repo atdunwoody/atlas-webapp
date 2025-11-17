@@ -688,7 +688,7 @@ def main() -> None:
         )
         currcond_field = currcond_options[currcond_label]
 
-        # ---- NEW: Deprioritize Tier I toggle ----
+        # ---- Deprioritize Tier I toggle ----
         deprioritize_tier1 = st.checkbox(
             "Deprioritize existing Tier I BSRs",
             value=False,
@@ -753,7 +753,9 @@ def main() -> None:
             st.session_state.gdf_scored = None
             st.session_state.last_weights = None
 
+        # -------------------------
         # Weights UI (6 components)
+        # -------------------------
         ns = WEIGHTS_NS
         weights, total = weight_inputs(
             currcond_label=currcond_label,
@@ -806,52 +808,36 @@ def main() -> None:
                 m = _score_map(st.session_state.gdf_scored, fill_opacity=0.55)
 
             st_folium(m, use_container_width=True, height=720, key="priority_map")
-                        # --- Original BSR Tier map (from input 'Tier' field) ---
-            if "Tier" in gdf.columns:
-                st.markdown("### Original BSR Tiers (from `Tier` field in input GeoPackage)")
-                try:
-                    m_orig = _original_tier_map(gdf, fill_opacity=0.55)
-                    st_folium(m_orig, use_container_width=True, height=720, key="original_tier_map")
-                except Exception as e:
-                    st.warning(f"Could not render original Tier map: {e}")
-            else:
-                st.info(
-                    "The input layer does not contain a `Tier` field, so the original "
-                    "BSR Tier map cannot be displayed."
-                )
 
-            # Build preview columns including per-metric weighted contributions
+            # --- table preview ---
             weighted_cols_preview = [
-                f"W_Geomorphic",
-                f"W_PScore",
-                f"W_UScore",
+                "W_Geomorphic",
+                "W_PScore",
+                "W_UScore",
                 f"W_{currcond_field}",
                 f"W_{currtemp_field}",
                 f"W_{migration_field}",
             ]
 
             preview_cols = [
-                "BSR", 
-                f"W_Geomorphic",
-                f"W_PScore",
-                f"W_UScore",
+                "BSR",
+                "W_Geomorphic",
+                "W_PScore",
+                "W_UScore",
                 f"W_{currcond_field}",
                 f"W_{currtemp_field}",
                 f"W_{migration_field}",
-                "Weighted_Score", "Weighted_Tier"
+                "Weighted_Score",
+                "Weighted_Tier",
             ]
 
-            # Only keep columns that exist
             preview_cols = [c for c in preview_cols if c in st.session_state.gdf_scored.columns]
 
             with st.expander("Table of new weighted metrics:"):
-                # Round the W_* contributions for readability in the preview only
                 df_prev = st.session_state.gdf_scored[preview_cols].copy()
-
                 for c in weighted_cols_preview + ["Weighted_Score"]:
                     if c in df_prev.columns:
                         df_prev[c] = pd.to_numeric(df_prev[c], errors="coerce").round(2)
-                # Drop the index so it doesn’t show in Streamlit
                 st.dataframe(df_prev.reset_index(drop=True))
 
             st.caption(
@@ -861,12 +847,31 @@ def main() -> None:
                 f"Catherine: ≥{tier_cfg['Catherine Creek']['t1_min']:.0f}→Tier 1, "
                 f"≥{tier_cfg['Catherine Creek']['t2_min']:.0f}→Tier 2."
             )
-
         else:
             st.info("Adjust weights so the total equals 100, then click **Compute**.")
+
+        # -------------------------------------------------
+        # Original BSR Tier map at the BOTTOM of the page
+        # (uses original gdf; independent of Compute)
+        # -------------------------------------------------
+        st.markdown("---")
+        st.markdown("### Original BSR Tiers")
+
+        if "Tier" in gdf.columns:
+            try:
+                m_orig = _original_tier_map(gdf, fill_opacity=0.55)
+                st_folium(m_orig, use_container_width=True, height=720, key="original_tier_map")
+            except Exception as e:
+                st.warning(f"Could not render original Tier map: {e}")
+        else:
+            st.info(
+                "The input layer does not contain a `Tier` field, so the original "
+                "BSR Tier map cannot be displayed."
+            )
 
     with tab_docs:
         render_docs()
 
 if __name__ == "__main__":
     main()
+
