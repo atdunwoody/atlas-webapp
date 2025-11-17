@@ -30,6 +30,7 @@ _init_state()
 # Tier threshold defaults & UI
 # -------------------------
 TIER_NS = "tier_cfg_v1"
+COMBINE_TIER_KEY = "combine_ugr_cc_tiering"  # NEW
 
 DEFAULT_TIER_THRESHOLDS = {
     "Upper Grande Ronde": {"t1_min": 85.0, "t2_min": 65.0},
@@ -63,42 +64,95 @@ def tier_inputs() -> Tuple[Dict[str, Dict[str, float]], bool, Optional[str]]:
     - **Tier 3**  Tier 2 Lower Bound ≥ Weighted BSR Score 
     """)
 
-    cols = st.columns(3)
+    # --- NEW: Combine UGR and CC Tiering toggle ---
+    st.session_state.setdefault(COMBINE_TIER_KEY, False)
+    combine_tiers = st.checkbox(
+        "Combine UGR and CC Tiering",
+        value=st.session_state[COMBINE_TIER_KEY],
+        help=(
+            "Use a single set of Tier thresholds for all BSRs in both Upper Grande Ronde "
+            "and Catherine Creek."
+        ),
+        key=COMBINE_TIER_KEY,
+    )
+
     basins_order = ["Upper Grande Ronde", "Catherine Creek"]
     labels = {
         "Upper Grande Ronde": "Upper Grande Ronde",
         "Catherine Creek": "Catherine Creek",
     }
 
-    for basin, col in zip(basins_order, cols):
-        with col:
-            st.write(f"**{labels[basin]}**")
+    if combine_tiers:
+        # Single column labeled "All BSRs"
+        cols = st.columns(1)
+        combined_key = "_UGR_CC_combined"  # internal storage for the combined thresholds
+
+        if combined_key not in ss:
+            # Initialize from UGR defaults (or any reasonable default)
+            ss[combined_key] = dict(DEFAULT_TIER_THRESHOLDS["Upper Grande Ronde"])
+
+        with cols[0]:
+            st.write("**All BSRs**")
             t1 = st.number_input(
-                f"Tier 1 Lower Bound",
+                "Tier 1 Lower Bound",
                 min_value=0.0, max_value=100.0, step=1.0,
-                value=float(ss[basin]["t1_min"]),
-                key=f"{TIER_NS}_{basin}_t1",
-                help="Scores at or above this go to Tier 1"
+                value=float(ss[combined_key]["t1_min"]),
+                key=f"{TIER_NS}_ALL_t1",
+                help="Scores at or above this go to Tier 1",
             )
             t2 = st.number_input(
-                f"Tier 2 Lower Bound",
+                "Tier 2 Lower Bound",
                 min_value=0.0, max_value=100.0, step=1.0,
-                value=float(ss[basin]["t2_min"]),
-                key=f"{TIER_NS}_{basin}_t2",
-                help="Scores at or above this (but below Tier 1 min) go to Tier 2"
+                value=float(ss[combined_key]["t2_min"]),
+                key=f"{TIER_NS}_ALL_t2",
+                help="Scores at or above this (but below Tier 1 min) go to Tier 2",
             )
-            ss[basin]["t1_min"] = float(t1)
-            ss[basin]["t2_min"] = float(t2)
+
+            ss[combined_key]["t1_min"] = float(t1)
+            ss[combined_key]["t2_min"] = float(t2)
+
+        # Apply the same thresholds to both basins in the returned config
+        ss["Upper Grande Ronde"]["t1_min"] = ss[combined_key]["t1_min"]
+        ss["Upper Grande Ronde"]["t2_min"] = ss[combined_key]["t2_min"]
+        ss["Catherine Creek"]["t1_min"] = ss[combined_key]["t1_min"]
+        ss["Catherine Creek"]["t2_min"] = ss[combined_key]["t2_min"]
+
+    else:
+        # Original per-basin UI (two separate columns)
+        cols = st.columns(3)  # third column unused; fine to leave
+        for basin, col in zip(basins_order, cols):
+            with col:
+                st.write(f"**{labels[basin]}**")
+                t1 = st.number_input(
+                    f"Tier 1 Lower Bound",
+                    min_value=0.0, max_value=100.0, step=1.0,
+                    value=float(ss[basin]["t1_min"]),
+                    key=f"{TIER_NS}_{basin}_t1",
+                    help="Scores at or above this go to Tier 1"
+                )
+                t2 = st.number_input(
+                    f"Tier 2 Lower Bound",
+                    min_value=0.0, max_value=100.0, step=1.0,
+                    value=float(ss[basin]["t2_min"]),
+                    key=f"{TIER_NS}_{basin}_t2",
+                    help="Scores at or above this (but below Tier 1 min) go to Tier 2"
+                )
+                ss[basin]["t1_min"] = float(t1)
+                ss[basin]["t2_min"] = float(t2)
 
     # Validate
     for basin, vals in ss.items():
-        if basin not in labels:  # ignore any stray keys
+        if basin not in labels:  # ignore any stray keys (_default, combined, etc.)
             continue
         t1, t2 = vals["t1_min"], vals["t2_min"]
         if not (0.0 <= t2 <= t1 <= 100.0):
-            return ss, False, f"Invalid thresholds for {labels.get(basin, basin)}: require 0 ≤ Tier2 min ≤ Tier1 min ≤ 100."
+            return ss, False, (
+                f"Invalid thresholds for {labels.get(basin, basin)}: "
+                f"require 0 ≤ Tier2 min ≤ Tier1 min ≤ 100."
+            )
 
     return ss, True, None
+
 
 # -------------------------
 # Path utilities & validation
@@ -547,19 +601,24 @@ def render_docs() -> None:
     st.markdown("""
 
     ### New Metrics in This Webapp  
-    #### 1) CurrTemp 18°C Threshold
+    **1) CurrTemp 18°C Threshold**
+    
     Weighted by the **% of Spring Chinook streams above 18°C** within each BSR using **NorWEST** modeled 19-year average August mean temperatures (1993–2011).
 
-    #### 2) CurrTemp 22°C Threshold
+    **2) CurrTemp 22°C Threshold**
+    
     Computed analogously to the 18°C metric but using the **22°C** exceedance.
 
-    #### 3) Current Condition RCAT – Prioritizes poor condition
+    **3) Current Condition RCAT – Prioritizes poor condition**
+    
     _{placeholder}_
 
-    #### 4) Current Condition RCAT – Prioritizes medium condition  
+    **4) Current Condition RCAT – Prioritizes medium condition**  
+    
     _{placeholder}_
 
-    #### 5) Migration Corridor Score
+    **5) Migration Corridor Score**
+    
     Weighted number of **Chinook** or **Steelhead** stream miles **upstream of each BSR**. Higher values indicate BSRs that are more critical for connecting upstream habitat.
 
     Reference (conceptual motivation):  
@@ -569,6 +628,7 @@ def render_docs() -> None:
     ---
     
     Please refer to the following memo for more information on scoring formulas and criteria:
+    
     **Lichen Land & Water Inc. (2025).** *Atlas Review and Roadmap for Potential Updates (2025) at BSR-Level.* Submitted to GRMW, November 2025.
     """)
 
@@ -634,7 +694,7 @@ def main() -> None:
             value=False,
             help=(
                 "If checked, all Tier 1 BSRs will have their scores set to"
-                " 'Poor' condition (i.e. value of 5) before scaling and calculation"
+                " 'Excellent' condition (i.e. value of 5) before scaling and calculation"
                 " of the new scoring."
             ),
         )
