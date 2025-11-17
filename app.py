@@ -63,7 +63,6 @@ def tier_inputs() -> Tuple[Dict[str, Dict[str, float]], bool, Optional[str]]:
     - **Tier 3**  Tier 2 Lower Bound ≥ Weighted BSR Score 
     """)
 
-
     cols = st.columns(3)
     basins_order = ["Upper Grande Ronde", "Catherine Creek"]
     labels = {
@@ -428,11 +427,23 @@ def _compute_and_store(
     currtemp_field: str,
     migration_field: str,
     tier_cfg: Dict[str, Dict[str, float]],
+    deprioritize_tier1: bool,
 ) -> None:
     """Compute fields and store results in session_state."""
+
+    # Apply Tier I deprioritization (in-memory only) before scaling/weighting
+    if deprioritize_tier1 and "Tier" in gdf.columns:
+        gdf_mod = gdf.copy()
+        mask = gdf_mod["Tier"] == 1
+        for col in ["CurrCond", "CurrCond_RCAT_Linear", "CurrCond_RCAT_Quad "]:
+            if col in gdf_mod.columns:
+                gdf_mod.loc[mask, col] = 5
+    else:
+        gdf_mod = gdf
+
     try:
         gdf_scored = compute_weighted_fields(
-            gdf, weights, currcond_field, currtemp_field, migration_field, tier_cfg
+            gdf_mod, weights, currcond_field, currtemp_field, migration_field, tier_cfg
         )
     except Exception as e:
         st.error(f"Failed to compute weighted fields: {e}")
@@ -583,7 +594,6 @@ def main() -> None:
             help="If not uploading, provide a path relative to app root."
         )
 
-
         if uploaded is not None:
             tmp_path = Path("/tmp") / uploaded.name
             with open(tmp_path, "wb") as f:
@@ -609,7 +619,6 @@ def main() -> None:
         if not tier_ok:
             st.error(tier_err)
 
-
         # -------------------------
         # Current Condition selector
         # -------------------------
@@ -626,6 +635,17 @@ def main() -> None:
             help="Controls both the weight label and the field used in the weighted score."
         )
         currcond_field = currcond_options[currcond_label]
+
+        # ---- NEW: Deprioritize Tier I toggle ----
+        deprioritize_tier1 = st.checkbox(
+            "Deprioritize existing Tier I BSRs",
+            value=False,
+            help=(
+                "If checked, all Tier 1 BSRs will have their scores set to"
+                "'Poor' condition (i.e. value of 5)before scaling and calculation"
+                "of the new scoring."
+            ),
+        )
 
         # -------------------------
         # CurrTemp selector
@@ -656,7 +676,11 @@ def main() -> None:
             "Choose the migration corridor metric:",
             list(migration_options.keys()),
             index=0,
-            help="These metrics represent the weighted number of **Chinook** or **Steelhead** stream miles **upstream of each BSR**. Higher values indicate BSRs that are more critical for connecting upstream habitat."
+            help=(
+                "These metrics represent the weighted number of **Chinook** or **Steelhead** stream "
+                "miles **upstream of each BSR**. Higher values indicate BSRs that are more critical "
+                "for connecting upstream habitat."
+            ),
         )
         migration_field = migration_options[migration_label]
 
@@ -694,10 +718,18 @@ def main() -> None:
             disabled=not ready or not tier_ok,
             help="Enabled when weights sum to 100 and tier thresholds are valid.",
             on_click=_compute_and_store,
-            args=(gdf, weights, current_sig, currcond_field, currtemp_field, migration_field, tier_cfg),
+            args=(
+                gdf,
+                weights,
+                current_sig,
+                currcond_field,
+                currtemp_field,
+                migration_field,
+                tier_cfg,
+                deprioritize_tier1,
+            ),
             key="compute_btn",
         )
-
 
         # Map style selector (applies to the last computed result)
         st.markdown("### New BSR Tiers")
@@ -723,7 +755,7 @@ def main() -> None:
 
             st_folium(m, use_container_width=True, height=720, key="priority_map")
 
-           # Build preview columns including per-metric weighted contributions
+            # Build preview columns including per-metric weighted contributions
             weighted_cols_preview = [
                 f"W_Geomorphic",
                 f"W_PScore",
