@@ -374,6 +374,62 @@ def _tier_map(
     folium.LayerControl().add_to(m)
     return m
 
+def _original_tier_map(
+    gdf: gpd.GeoDataFrame,
+    fill_opacity: float = 0.55,
+) -> folium.Map:
+    """
+    Folium map of original Tier (from 'Tier' field in the input GPKG):
+      - 1 -> green, 2 -> blue, 3 -> red (slightly transparent).
+    """
+    if "Tier" not in gdf.columns:
+        raise ValueError("Tier field not found in GeoDataFrame.")
+
+    tier_colors = {1: "#1b9e77", 2: "#377eb8", 3: "#e41a1c"}
+
+    def style_fn(feature):
+        t = feature["properties"].get("Tier", None)
+        try:
+            t_int = int(t) if t is not None else None
+        except (TypeError, ValueError):
+            t_int = None
+        color = tier_colors.get(t_int, "#377eb8")
+        return {
+            "fillColor": color,
+            "color": "#333333",
+            "weight": 0.6,
+            "fillOpacity": fill_opacity,
+        }
+
+    m = folium.Map(tiles="CartoDB positron", control_scale=True)
+    x_min, y_min, x_max, y_max = gdf.total_bounds
+    m.fit_bounds([[y_min, x_min], [y_max, x_max]])
+
+    fields = [f for f in ["BSR", "Tier"] if f in gdf.columns]
+    aliases = [f"{f}:" for f in fields]
+
+    folium.GeoJson(
+        gdf,
+        name="Original Tier",
+        style_function=style_fn,
+        tooltip=folium.GeoJsonTooltip(fields=fields, aliases=aliases, sticky=True),
+    ).add_to(m)
+
+    legend_html = """
+    <div style="position: fixed; bottom: 50px; left: 10px; z-index: 9999;
+                background: white; padding: 8px 10px; border: 1px solid #bbb;
+                border-radius: 4px; font-size: 12px;">
+      <div style="margin-bottom:6px;"><b>Original BSR Tier</b></div>
+      <div><span style="display:inline-block;width:14px;height:14px;background:#1b9e77;border:1px solid #333;margin-right:6px;"></span> 1</div>
+      <div><span style="display:inline-block;width:14px;height:14px;background:#377eb8;border:1px solid #333;margin-right:6px;"></span> 2</div>
+      <div><span style="display:inline-block;width:14px;height:14px;background:#e41a1c;border:1px solid #333;margin-right:6px;"></span> 3</div>
+    </div>
+    """
+    m.get_root().html.add_child(folium.Element(legend_html))
+    folium.LayerControl().add_to(m)
+    return m
+
+
 def _score_map(
     gdf: gpd.GeoDataFrame,
     fill_opacity: float = 0.55,
@@ -754,6 +810,19 @@ def main() -> None:
                 m = _score_map(st.session_state.gdf_scored, fill_opacity=0.55)
 
             st_folium(m, use_container_width=True, height=720, key="priority_map")
+                        # --- Original BSR Tier map (from input 'Tier' field) ---
+            if "Tier" in gdf.columns:
+                st.markdown("### Original BSR Tiers (from `Tier` field in input GeoPackage)")
+                try:
+                    m_orig = _original_tier_map(gdf, fill_opacity=0.55)
+                    st_folium(m_orig, use_container_width=True, height=720, key="original_tier_map")
+                except Exception as e:
+                    st.warning(f"Could not render original Tier map: {e}")
+            else:
+                st.info(
+                    "The input layer does not contain a `Tier` field, so the original "
+                    "BSR Tier map cannot be displayed."
+                )
 
             # Build preview columns including per-metric weighted contributions
             weighted_cols_preview = [
