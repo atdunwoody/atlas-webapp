@@ -11,10 +11,6 @@ import warnings
 import os
 warnings.filterwarnings('ignore')
 
-print("=" * 60)
-print("RUNNING UPDATED VERSION - Script last modified: 8/20/2025 3:10 PM")
-print("=" * 60)
-
 def analyze_temp_anomalies(input_file, basin_name):
     """
     Analyze temperature anomalies for a given basin.
@@ -58,7 +54,7 @@ def analyze_temp_anomalies(input_file, basin_name):
     
     # Flag anomalies
     df['anomaly'] = np.where(df['resid_z'] > 1, 'Warm anomaly',
-                      np.where(df['resid_z'] < -1, 'Cool anomaly', 'Normal')) #Anomaly 'boundary' set to +/- 1 STD to show trends. Weren't very many before.
+                      np.where(df['resid_z'] < -1, 'Cool anomaly', 'Normal'))
     
     # Print model summary
     print(f"Model summary for {basin_name}:")
@@ -128,8 +124,8 @@ if bsr_gdf is not None:
     bsr_gdf.boundary.plot(ax=ax, color='gray', linewidth=0.5, alpha=0.7)
 
 # Define colors for anomalies
-color_map = {'Warm anomaly': 'red', 'Cool anomaly': 'blue', 'Normal': 'none'}
-edge_colors = {'Warm anomaly': 'red', 'Cool anomaly': 'blue', 'Normal': 'lightgray'}
+color_map = {'Warm anomaly': 'red', 'Cool anomaly': 'blue', 'Normal': 'lightgray'}
+#edge_colors = {'Warm anomaly': 'red', 'Cool anomaly': 'blue', 'Normal': 'black'}
 
 # Plot each anomaly type
 for anomaly_type in ['Warm anomaly', 'Cool anomaly', 'Normal']:
@@ -138,9 +134,9 @@ for anomaly_type in ['Warm anomaly', 'Cool anomaly', 'Normal']:
         subset.plot(ax=ax, 
                    color=color_map[anomaly_type], 
                    edgecolor=edge_colors[anomaly_type],
-                   alpha=0.7 if anomaly_type != 'Normal' else 0.1,
+                   alpha=0.7, #if anomaly_type != 'Normal' else 0,
                    linewidth=0.5,
-                   markersize=15 if anomaly_type != 'Normal' else 8,
+                   markersize=15 if anomaly_type != 'Normal' else 10,
                    label=f'{anomaly_type} (n={len(subset)})')
 
 ax.set_title('Stream Temperature Anomalies (1 STD) by Basin', fontsize=16, fontweight='bold')
@@ -231,3 +227,5 @@ print(f"Analysis plots saved to: {plots_output}")
 print(f"\nVisualizations saved:")
 print(f"  Map: {map_output}")
 print(f"  Analysis plots: {plots_output}")
+
+print("This is a new code")
